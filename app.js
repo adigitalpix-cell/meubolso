@@ -162,6 +162,41 @@ async function refreshCurrentUserData() {
   db = await loadScopedDatabase(user);
 }
 
+async function refreshUserFinancialData() {
+  const user = currentUser() || await loadUserById(session);
+  if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
+  const filter = `usuario_id=eq.${session}`;
+  const [receitas, despesas, cartoes, compras, parcelas, categorias, tiposConta] = await Promise.all([
+    supabaseSelect("receitas", selectWithFilter(filter)),
+    supabaseSelect("despesas", selectWithFilter(filter)),
+    supabaseSelect("cartoes", selectWithFilter(filter)),
+    supabaseSelect("compras_cartao", selectWithFilter(filter)),
+    supabaseSelect("parcelas", selectWithFilter(filter)),
+    supabaseSelect("categorias", selectWithFilter(filter)),
+    supabaseSelect("tipos_conta", selectWithFilter(filter))
+  ]);
+  console.log("[Minhas Finanças][Supabase] SELECT despesas usuario_id", session, despesas.length, despesas);
+  const loaded = normalizeDatabase(fromSupabaseRows({
+    usuarios: [userToSupabaseLike(user)],
+    receitas,
+    despesas,
+    cartoes,
+    compras,
+    parcelas,
+    suporte: [],
+    renovacoes: [],
+    categorias,
+    tiposConta
+  }));
+  db.users = db.users.some(item => item.id === user.id) ? db.users.map(item => item.id === user.id ? user : item) : [...db.users, user];
+  db.transactions[session] = loaded.transactions[session] || [];
+  db.cards[session] = loaded.cards[session] || [];
+  db.cardPurchases[session] = loaded.cardPurchases[session] || [];
+  db.categories[session] = loaded.categories[session] || [...DEFAULT_CATEGORIES];
+  db.accounts[session] = loaded.accounts[session] || [...DEFAULT_ACCOUNTS];
+  logSupabaseLoad(user, db);
+}
+
 async function loadUserById(id) {
   if (!id) return null;
   const rows = await supabaseSelect("usuarios", `select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
@@ -1926,7 +1961,8 @@ function bindLogin() {
     }
     session = user.id;
     try {
-      db = await loadScopedDatabase(user);
+      db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+      await refreshUserFinancialData();
     } catch (error) {
       session = null;
       return showToast("Não foi possível carregar os dados do usuário.");
@@ -2254,7 +2290,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
   }
   try {
     await saveTransactionToSupabase(savedItem, previousType);
-    await refreshCurrentUserData();
+    await refreshUserFinancialData();
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -2285,7 +2321,7 @@ async function markTransactionPaid(transactionId) {
   item.paymentMethod ||= "Não informado";
   try {
     await saveTransactionToSupabase(item);
-    await refreshCurrentUserData();
+    await refreshUserFinancialData();
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -2569,7 +2605,7 @@ async function saveCard(event) {
   }
   try {
     await saveCardToSupabase(savedCard);
-    await refreshCurrentUserData();
+    await refreshUserFinancialData();
     selectedCardId = savedCard.id;
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
@@ -2638,7 +2674,7 @@ async function saveCardPurchase(event) {
     await savePurchaseToSupabase(savedPurchase);
     const installmentTransactions = (db.transactions[session] || []).filter(item => item.sourcePurchaseId === savedPurchase.id);
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshCurrentUserData();
+    await refreshUserFinancialData();
     selectedCardId = savedPurchase.cardId;
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
@@ -2740,7 +2776,7 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
     await savePurchaseToSupabase(purchase);
     const installmentTransactions = (db.transactions[session] || []).filter(item => item.sourcePurchaseId === purchase.id);
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshCurrentUserData();
+    await refreshUserFinancialData();
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -2811,7 +2847,7 @@ document.querySelector("#list-form").addEventListener("submit", async event => {
   }
   try {
     await saveListItemToSupabase(activeListType, name);
-    await refreshCurrentUserData();
+    await refreshUserFinancialData();
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -2989,7 +3025,17 @@ async function initializeApp() {
   lastSyncError = "";
   render();
   try {
-    db = await loadDatabase();
+    if (session) {
+      const user = await loadUserById(session);
+      if (user) {
+        db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+        await refreshUserFinancialData();
+      } else {
+        db = await loadDatabase();
+      }
+    } else {
+      db = await loadDatabase();
+    }
     if (session && !currentUser()) {
       session = null;
       sessionStorage.removeItem(SESSION_KEY);
