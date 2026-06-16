@@ -263,6 +263,13 @@ button { cursor: pointer; }
 .profile-card h2 { margin: 0 0 4px; }
 .profile-card p { margin: 0; color: var(--muted); font-size: 12px; }
 .access-date { margin-top: 14px; padding: 10px; border-radius: 11px; color: var(--green); background: var(--green-soft); font-size: 11px; }
+.app-version-card { margin-top: 14px; padding: 16px; border-radius: 18px; background: white; border: 1px solid var(--line); }
+.app-version-card span, .app-version-card small { display: block; color: var(--muted); font-size: 10px; font-weight: 700; }
+.app-version-card h2 { margin: 5px 0 2px; font-size: 17px; }
+.app-version-card p { margin: 0 0 5px; color: var(--green); font-size: 12px; font-weight: 800; }
+.app-version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 13px; }
+.app-version-actions button { min-height: 39px; border: 0; border-radius: 11px; color: var(--green); background: var(--green-soft); font-size: 10px; font-weight: 900; }
+.app-version-actions button:last-child { color: var(--red); background: var(--red-soft); }
 .menu-list { margin-top: 16px; display: grid; gap: 9px; }
 .menu-item { width: 100%; padding: 15px 17px; display: flex; justify-content: space-between; border: 0; border-radius: 15px; color: var(--ink); background: white; text-align: left; font-weight: 700; }
 .menu-item.danger { color: var(--red); }

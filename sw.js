@@ -1,4 +1,4 @@
-const CACHE_NAME = "minhas-financas-v5";
+const CACHE_NAME = "minhas-financas-v6";
 const ASSETS = [
   "./",
   "./index.html",
@@ -31,4 +31,8 @@ self.addEventListener("fetch", event => {
       return response;
     }).catch(() => caches.match("./").then(hit => hit || caches.match("./index.html"))))
   );
+});
+
+self.addEventListener("message", event => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });

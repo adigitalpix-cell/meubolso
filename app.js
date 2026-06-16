@@ -1,4 +1,7 @@
 const SESSION_KEY = "minhas-financas-session";
+const APP_NAME = "Meu Bolso";
+const APP_VERSION = "1.0.4";
+const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
 const DEFAULT_CATEGORIES = ["Alimentação", "Moradia", "Transporte", "Saúde", "Educação", "Lazer", "Salário", "Outros"];
@@ -1661,6 +1664,18 @@ function profileTemplate() {
       <p>@${escapeHtml(user.username)} · ${user.role === "master" ? "Administrador master" : "Usuário"}</p>
       ${user.role === "user" ? `<div class="access-date">Acesso válido até <b>${formatDate(user.accessExpiresAt, true)}</b></div>` : ""}
     </article>
+    <article class="app-version-card">
+      <div>
+        <span>Versão do Aplicativo</span>
+        <h2>${escapeHtml(APP_NAME)}</h2>
+        <p>Versão ${escapeHtml(APP_VERSION)}</p>
+        <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
+      </div>
+      <div class="app-version-actions">
+        <button type="button" data-check-updates>Verificar Atualizações</button>
+        <button type="button" data-clear-cache>Limpar Cache</button>
+      </div>
+    </article>
     <div class="menu-list">
       ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
       <button class="menu-item" data-view="support"><span>${isMaster() ? "Menu Suporte" : "Falar com o Suporte"}</span><b>›</b></button>
@@ -2116,6 +2131,8 @@ function bindAppEvents() {
   document.querySelector("[data-logout]")?.addEventListener("click", async () => {
     if (await confirmAction()) logout();
   });
+  document.querySelector("[data-clear-cache]")?.addEventListener("click", clearAppCache);
+  document.querySelector("[data-check-updates]")?.addEventListener("click", checkAppUpdates);
   document.querySelector("#user-form")?.addEventListener("submit", saveUser);
   document.querySelector("[data-new-user]")?.addEventListener("click", () => {
     editingUserId = null;
@@ -2209,6 +2226,69 @@ function logout() {
   authView = "login";
   render();
   showToast("Operação realizada com sucesso.");
+}
+
+async function checkAppUpdates() {
+  try {
+    await updateServiceWorker();
+    await clearBrowserCaches();
+    showToast("Cache atualizado com sucesso.");
+    setTimeout(() => window.location.reload(), 700);
+  } catch (error) {
+    console.error("[Minhas Finanças][PWA] erro ao verificar atualizações", error);
+    showToast("Não foi possível concluir a operação.");
+  }
+}
+
+async function clearAppCache() {
+  if (!await confirmCacheClear()) return;
+  try {
+    await updateServiceWorker();
+    await clearBrowserCaches();
+    showToast("Cache atualizado com sucesso.");
+    setTimeout(() => window.location.reload(), 700);
+  } catch (error) {
+    console.error("[Minhas Finanças][PWA] erro ao limpar cache", error);
+    showToast("Não foi possível concluir a operação.");
+  }
+}
+
+async function updateServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registrations.map(async registration => {
+    await registration.update();
+    if (registration.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
+  }));
+}
+
+async function clearBrowserCaches() {
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(key => caches.delete(key)));
+  }
+}
+
+function confirmCacheClear() {
+  const dialog = document.querySelector("#confirm-dialog");
+  const title = dialog.querySelector("h2");
+  const message = dialog.querySelector("p");
+  const yesButton = dialog.querySelector("[data-confirm-yes]");
+  const noButton = dialog.querySelector("[data-confirm-no]");
+  const oldTitle = title.textContent;
+  const oldMessage = message.textContent;
+  const oldYes = yesButton.textContent;
+  const oldNo = noButton.textContent;
+  title.textContent = "Limpar Cache";
+  message.textContent = "Deseja limpar o cache do aplicativo?";
+  yesButton.textContent = "Limpar Cache";
+  noButton.textContent = "Cancelar";
+  return confirmAction().finally(() => {
+    title.textContent = oldTitle;
+    message.textContent = oldMessage;
+    yesButton.textContent = oldYes;
+    noButton.textContent = oldNo;
+  });
 }
 
 function openTransactionDialog(type = "expense") {
