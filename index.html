@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#11231f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Minhas Finanças">
+  <title>Minhas Finanças</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-192.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="app"></main>
+  <div id="toast" class="toast" role="status"></div>
+
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <div class="confirm-icon">!</div>
+    <h2>Confirmar ação</h2>
+    <p>Tem certeza que deseja executar esta ação?</p>
+    <div class="confirm-actions">
+      <button type="button" class="secondary-button" data-confirm-no>Não</button>
+      <button type="button" class="primary-button" data-confirm-yes>Sim</button>
+    </div>
+  </dialog>
+
+  <dialog id="renew-dialog" class="confirm-dialog">
+    <div class="confirm-icon">↻</div>
+    <h2>Renovar acesso</h2>
+    <p>Escolha o novo período de validade.</p>
+    <div class="renew-options">
+      <button type="button" data-renew-months="1">1 mês</button>
+      <button type="button" data-renew-months="2">2 meses</button>
+      <button type="button" data-renew-months="3">3 meses</button>
+      <button type="button" data-renew-months="6">6 meses</button>
+      <button type="button" data-renew-months="12">12 meses</button>
+    </div>
+    <label class="field renew-date"><span>Data personalizada</span><input type="date" id="renew-custom-date"></label>
+    <div class="confirm-actions">
+      <button type="button" class="secondary-button" data-renew-cancel>Cancelar</button>
+      <button type="button" class="primary-button" data-renew-custom>Aplicar data</button>
+    </div>
+  </dialog>
+
+  <dialog id="transaction-dialog" class="sheet">
+    <form id="transaction-form" method="dialog">
+      <div class="sheet-handle"></div>
+      <header class="sheet-header">
+        <div>
+          <span class="eyebrow">Nova movimentação</span>
+          <h2 id="form-title">Adicionar transação</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Fechar">×</button>
+      </header>
+
+      <div class="type-selector" role="group" aria-label="Tipo da movimentação">
+        <label><input type="radio" name="type" value="expense" checked><span>Despesa</span></label>
+        <label><input type="radio" name="type" value="income"><span>Receita</span></label>
+      </div>
+
+      <div class="form-grid">
+        <label class="field field-wide">
+          <span>Nome</span>
+          <input name="name" required maxlength="60" placeholder="Ex.: Supermercado">
+        </label>
+        <label class="field">
+          <span>Valor</span>
+          <div class="money-input"><b>R$</b><input name="amount" required inputmode="decimal" placeholder="0,00"></div>
+        </label>
+        <label class="field">
+          <span>Vencimento</span>
+          <input name="dueDate" required type="date">
+        </label>
+        <label class="field">
+          <span>Pagamento</span>
+          <select name="repeat">
+            <option value="none">Não repete</option>
+            <option value="fixed">Fixo mensal</option>
+          </select>
+        </label>
+        <label class="field">
+          <span id="status-label">Status</span>
+          <select name="status">
+            <option value="paid">Pago</option>
+            <option value="pending">Não pago</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-title">Categoria <button class="mini-plus" type="button" data-manage-list="categories">+</button></span>
+          <select name="category">
+            <option>Alimentação</option>
+            <option>Moradia</option>
+            <option>Transporte</option>
+            <option>Saúde</option>
+            <option>Educação</option>
+            <option>Lazer</option>
+            <option>Salário</option>
+            <option>Outros</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-title">Tipo de conta <button class="mini-plus" type="button" data-manage-list="accounts">+</button></span>
+          <select name="account">
+            <option>Conta corrente</option>
+            <option>Dinheiro</option>
+            <option>Poupança</option>
+            <option>Cartão principal</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Forma de pagamento</span>
+          <select name="paymentMethod">
+            <option>Pix</option>
+            <option>Dinheiro</option>
+            <option>Débito</option>
+            <option>Crédito</option>
+            <option>Transferência</option>
+            <option>Boleto</option>
+            <option>Outro</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Data do pagamento</span>
+          <input name="paidDate" type="date">
+        </label>
+        <label class="field">
+          <span>Hora do pagamento</span>
+          <input name="paidTime" type="time">
+        </label>
+      </div>
+      <button class="primary-button" type="submit">Salvar movimentação</button>
+    </form>
+  </dialog>
+
+  <dialog id="list-dialog" class="sheet">
+    <form id="list-form" method="dialog">
+      <div class="sheet-handle"></div>
+      <header class="sheet-header">
+        <div>
+          <span class="eyebrow" id="list-eyebrow">Gerenciar</span>
+          <h2 id="list-title">Itens</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-list aria-label="Fechar">×</button>
+      </header>
+      <label class="field"><span>Nome</span><input name="name" required maxlength="40" placeholder="Novo item"></label>
+      <button class="primary-button" type="submit">Salvar</button>
+      <div id="list-items" class="manage-list"></div>
+    </form>
+  </dialog>
+
+  <script src="supabase-config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js"));
+    }
+  </script>
+</body>
+</html>
