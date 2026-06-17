@@ -1,4 +1,4 @@
-const CACHE_NAME = "minhas-financas-v11";
+const CACHE_NAME = "minhas-financas-v12";
 const ASSETS = [
   "/",
   "/index.html",
@@ -6,8 +6,8 @@ const ASSETS = [
   "/app.js",
   "/supabase-config.js",
   "/manifest.webmanifest",
-  "/icons/icon-192.svg",
-  "/icons/icon-512.svg"
+  "/icon-192.svg",
+  "/icon-512.svg"
 ];
 
 self.addEventListener("install", event => {

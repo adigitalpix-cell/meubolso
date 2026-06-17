@@ -1,22 +1,46 @@
-# Migração para Supabase
+# Minhas Finanças
 
-Este diretório prepara a estrutura online do app Minhas Finanças.
+Aplicativo financeiro PWA para controle de usuários, receitas, despesas, cartões, compras parceladas, parcelas e suporte.
 
-## Arquivos
+## Publicação na Vercel
 
-- `schema.sql`: cria as tabelas `usuarios`, `receitas`, `despesas`, `cartoes`, `compras_cartao`, `parcelas`, `suporte`, `renovacoes` e tabelas auxiliares de categorias/tipos de conta.
-- `config.example.js`: modelo para informar a URL e a chave pública do projeto Supabase.
+Este projeto é estático. Para publicar:
 
-## Como aplicar no Supabase
+1. Envie os arquivos do projeto para um repositório GitHub.
+2. Na Vercel, importe o repositório.
+3. Framework Preset: `Other`.
+4. Build Command: deixe vazio.
+5. Output Directory: deixe vazio ou use a raiz.
+6. Deploy.
 
-1. Abra o painel do Supabase.
-2. Entre em SQL Editor.
-3. Cole e execute o conteúdo de `schema.sql`.
-4. Copie `config.example.js` para `supabase-config.js`.
-5. Preencha `url` e `anonKey` com os dados reais do projeto.
+## Supabase
 
-## Observação de segurança
+O app usa o arquivo de conexão:
 
-O app usa login por nome de usuário e senha própria. Para garantir que cada usuário veja apenas seus dados no Supabase, a etapa seguinte precisa ligar esse login a uma camada segura de autenticação.
+```txt
+supabase-config.js
+```
 
-Sem isso, qualquer proteção feita apenas no JavaScript do navegador não é suficiente para dados reais de clientes, porque a chave pública do Supabase fica visível no aplicativo.
+Ele precisa ficar na raiz do projeto, no mesmo nível do `index.html`.
+
+O SQL do Supabase pode ser guardado separadamente como documentação. A pasta `supabase` não é necessária para o app funcionar na Vercel.
+
+## Arquivos principais
+
+```txt
+index.html
+app.js
+styles.css
+supabase-config.js
+manifest.webmanifest
+sw.js
+vercel.json
+icon-192.svg
+icon-512.svg
+README.md
+.gitignore
+```
+
+## Observação
+
+O app usa Supabase via REST API e sincroniza os dados por `usuario_id`.
