@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -292,7 +292,20 @@ async function deleteRows(table, query) {
 }
 
 async function deleteRowById(table, id) {
-  if (id) await deleteRows(table, `id=eq.${id}`);
+  if (id) await deleteRows(table, supabaseEq("id", id));
+}
+
+function supabaseEq(column, value) {
+  return `${column}=eq.${encodeURIComponent(value)}`;
+}
+
+function supabaseAnd(...filters) {
+  return filters.filter(Boolean).join("&");
+}
+
+function showDeleteError(error) {
+  console.error("[Minhas Finanças][Supabase] erro ao excluir", error);
+  showToast("Não foi possível concluir a operação.");
 }
 
 async function supabaseSelect(table, query = "select=*") {
@@ -1791,11 +1804,12 @@ function supportTicketRow(ticket) {
         <div class="support-actions support-actions-secondary">
           <button data-reply-ticket="${ticket.id}">Responder</button>
           <button data-whatsapp-ticket="${ticket.id}">WhatsApp</button>
+          <button class="danger" data-delete-support="${ticket.id}">Excluir</button>
         </div>
         ${ticket.replyOpen ? `<form class="reply-form" data-reply-form="${ticket.id}">
           <label class="field"><span>Digite sua resposta...</span><textarea name="reply" required>${escapeHtml(ticket.replyDraft || "")}</textarea></label>
           <button class="primary-button">Enviar resposta</button>
-        </form>` : ""}` : ""}
+        </form>` : ""}` : `<div class="support-actions support-actions-secondary"><button class="danger" data-delete-support="${ticket.id}">Excluir</button></div>`}
     </article>`;
 }
 
@@ -2226,6 +2240,7 @@ function bindAppEvents() {
   document.querySelectorAll("[data-support-status]").forEach(button => button.addEventListener("click", () => updateSupportStatus(button.dataset.ticketId, button.dataset.supportStatus)));
   document.querySelectorAll("[data-reply-ticket]").forEach(button => button.addEventListener("click", () => toggleSupportReply(button.dataset.replyTicket)));
   document.querySelectorAll("[data-whatsapp-ticket]").forEach(button => button.addEventListener("click", () => openSupportWhatsapp(button.dataset.whatsappTicket)));
+  document.querySelectorAll("[data-delete-support]").forEach(button => button.addEventListener("click", () => deleteSupportTicket(button.dataset.deleteSupport)));
   document.querySelectorAll("[data-reply-form]").forEach(form => form.addEventListener("submit", sendSupportReply));
   document.querySelector("[data-clear-user-filters]")?.addEventListener("click", () => {
     resetUserFilters();
@@ -2439,10 +2454,14 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
 
 async function deleteTransaction(transactionId) {
   if (isMaster() || !await confirmAction()) return;
-  const before = db.transactions[session]?.length || 0;
-  db.transactions[session] = (db.transactions[session] || []).filter(item => item.id !== transactionId);
-  if (db.transactions[session].length === before) return showToast("Não foi possível concluir a operação.");
-  saveDatabase();
+  const item = (db.transactions[session] || []).find(transaction => transaction.id === transactionId);
+  if (!item) return showToast("Não foi possível concluir a operação.");
+  try {
+    await deleteRowById(item.type === "income" ? "receitas" : "despesas", item.id);
+    await refreshUserFinancialData();
+  } catch (error) {
+    return showDeleteError(error);
+  }
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -2577,6 +2596,21 @@ function openSupportWhatsapp(ticketId) {
   window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(message)}`, "_blank");
 }
 
+async function deleteSupportTicket(ticketId) {
+  const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
+  if (!ticket || !await confirmAction()) return;
+  if (!isMaster() && ticket.userId !== session) return showToast("Acesso não autorizado.");
+  try {
+    await deleteRowById("suporte", ticketId);
+    if (isMaster()) await refreshMasterData();
+    else await refreshCurrentUserData();
+  } catch (error) {
+    return showDeleteError(error);
+  }
+  showToast("Operação realizada com sucesso.");
+  render();
+}
+
 async function saveUser(event) {
   event.preventDefault();
   if (!isMaster()) return showToast("Acesso não autorizado.");
@@ -2640,22 +2674,33 @@ async function saveUser(event) {
   render();
 }
 
+async function deleteUserCascade(userId) {
+  const userFilter = supabaseEq("usuario_id", userId);
+  await deleteRows("parcelas", userFilter);
+  await deleteRows("compras_cartao", userFilter);
+  await deleteRows("cartoes", userFilter);
+  await deleteRows("despesas", userFilter);
+  await deleteRows("receitas", userFilter);
+  await deleteRows("suporte", userFilter);
+  await deleteRows("renovacoes", userFilter);
+  await deleteRows("categorias", userFilter);
+  await deleteRows("tipos_conta", userFilter);
+  await deleteRowById("usuarios", userId);
+}
+
 async function deleteUser(userId) {
   if (!isMaster()) return showToast("Acesso não autorizado.");
   const user = regularUsers().find(item => item.id === userId);
   if (!user) return;
   if (!await confirmAction()) return;
-  db.users = db.users.filter(item => item.id !== userId);
-  delete db.transactions[userId];
-  delete db.cards[userId];
-  delete db.cardPurchases[userId];
-  delete db.categories[userId];
-  delete db.accounts[userId];
-  db.renewals = (db.renewals || []).filter(item => item.userId !== userId);
-  db.supportTickets = (db.supportTickets || []).filter(item => item.userId !== userId);
+  try {
+    await deleteUserCascade(userId);
+    await refreshMasterData();
+  } catch (error) {
+    return showDeleteError(error);
+  }
   if (reportUserId === userId) reportUserId = "all";
   if (editingUserId === userId) editingUserId = null;
-  saveDatabase();
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -2886,21 +2931,46 @@ function syncPaidInstallmentTransactions(purchase) {
 
 async function deleteCard(cardId) {
   if (isMaster() || !await confirmAction()) return;
-  db.cards[session] = userCards().filter(card => card.id !== cardId);
-  db.cardPurchases[session] = userCardPurchases().filter(purchase => purchase.cardId !== cardId);
-  if (selectedCardId === cardId) selectedCardId = db.cards[session][0]?.id || null;
-  saveDatabase();
+  const card = userCards().find(item => item.id === cardId);
+  if (!card) return showToast("Não foi possível concluir a operação.");
+  try {
+    await deleteCardCascade(cardId);
+    await refreshUserFinancialData();
+  } catch (error) {
+    return showDeleteError(error);
+  }
+  if (selectedCardId === cardId) selectedCardId = userCards()[0]?.id || null;
   showToast("Operação realizada com sucesso.");
   render();
 }
 
+async function deleteCardCascade(cardId) {
+  const purchases = userCardPurchases().filter(purchase => purchase.cardId === cardId);
+  await Promise.all(purchases.map(purchase => deletePurchaseCascade(purchase.id)));
+  await deleteRows("compras_cartao", supabaseEq("cartao_id", cardId));
+  await deleteRowById("cartoes", cardId);
+}
+
 async function deletePurchase(purchaseId) {
   if (isMaster() || !await confirmAction()) return;
-  db.cardPurchases[session] = userCardPurchases().filter(purchase => purchase.id !== purchaseId);
-  db.transactions[session] = (db.transactions[session] || []).filter(item => item.sourcePurchaseId !== purchaseId);
-  saveDatabase();
+  const purchase = userCardPurchases().find(item => item.id === purchaseId);
+  if (!purchase) return showToast("Não foi possível concluir a operação.");
+  try {
+    await deletePurchaseCascade(purchaseId);
+    await refreshUserFinancialData();
+  } catch (error) {
+    return showDeleteError(error);
+  }
+  selectedCardId = purchase.cardId;
+  currentView = "cardPurchases";
   showToast("Operação realizada com sucesso.");
   render();
+}
+
+async function deletePurchaseCascade(purchaseId) {
+  await deleteRows("despesas", supabaseEq("compra_cartao_id", purchaseId));
+  await deleteRows("parcelas", supabaseEq("compra_cartao_id", purchaseId));
+  await deleteRowById("compras_cartao", purchaseId);
 }
 
 async function payCardInstallment(purchaseId, installmentKey = null) {
@@ -3079,10 +3149,21 @@ async function deleteListItem(item) {
   const list = activeListType === "categories" ? db.categories[session] : db.accounts[session];
   if (list.length <= 1 || !await confirmAction()) return;
   const replacement = list.find(value => value !== item) || "Outros";
+  const table = activeListType === "categories" ? "categorias" : "tipos_conta";
+  try {
+    await deleteRows(table, supabaseAnd(supabaseEq("usuario_id", session), supabaseEq("nome", item)));
+  } catch (error) {
+    return showDeleteError(error);
+  }
   if (activeListType === "categories") db.categories[session] = list.filter(value => value !== item);
   else db.accounts[session] = list.filter(value => value !== item);
   updateTransactionsListValue(activeListType, item, replacement);
-  saveDatabase();
+  try {
+    await saveDatabase();
+    await refreshUserFinancialData();
+  } catch (error) {
+    return showDeleteError(error);
+  }
   renderListManager();
   refreshTransactionLists();
   refreshPurchaseLists();
