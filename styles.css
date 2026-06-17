@@ -63,6 +63,7 @@ button { cursor: pointer; }
 .login-alert { margin-bottom: 16px; padding: 12px; border-radius: 12px; color: #9d3131; background: var(--red-soft); font-size: 12px; font-weight: 700; line-height: 1.45; }
 
 .field { display: grid; gap: 7px; margin-bottom: 15px; }
+.field.hidden { display: none; }
 .field > span { font-size: 12px; color: #68736f; font-weight: 700; }
 .field input, .field select, .field textarea, .money-input {
   width: 100%;
@@ -74,6 +75,7 @@ button { cursor: pointer; }
   color: var(--ink);
   background: #fafbf8;
 }
+.static-field { min-height: 48px; padding: 0 14px; display: flex; align-items: center; border: 1px solid var(--line); border-radius: 13px; color: var(--green); background: #fafbf8; font-size: 12px; font-weight: 800; }
 .field textarea { min-height: 110px; padding-top: 13px; resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus, .money-input:focus-within { border-color: var(--green); box-shadow: 0 0 0 3px rgba(22, 107, 80, .1); }
 .field-title { display: flex; align-items: center; justify-content: space-between; }
@@ -235,6 +237,7 @@ button { cursor: pointer; }
 .card-actions-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 15px 0; }
 .card-actions-row.single { grid-template-columns: 1fr; }
 .card-actions-row button:disabled { opacity: .45; cursor: not-allowed; }
+.invoice-pay-button { margin-bottom: 14px; }
 .card-list, .purchase-list { display: grid; gap: 10px; }
 .mini-card, .purchase-row, .security-card { padding: 15px; border-radius: 17px; background: white; border: 1px solid var(--line); }
 .mini-card.selected { border-color: var(--green); box-shadow: 0 0 0 3px rgba(22, 107, 80, .08); }

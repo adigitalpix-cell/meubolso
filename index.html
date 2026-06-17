@@ -108,7 +108,7 @@
             <option>Cartão principal</option>
           </select>
         </label>
-        <label class="field">
+        <label class="field payment-extra hidden">
           <span>Forma de pagamento</span>
           <select name="paymentMethod">
             <option>Pix</option>
@@ -120,13 +120,13 @@
             <option>Outro</option>
           </select>
         </label>
-        <label class="field">
+        <label class="field payment-extra hidden">
           <span>Data do pagamento</span>
-          <input name="paidDate" type="date">
+          <input name="paidDate" type="date" readonly>
         </label>
-        <label class="field">
+        <label class="field payment-extra hidden">
           <span>Hora do pagamento</span>
-          <input name="paidTime" type="time">
+          <input name="paidTime" type="time" readonly>
         </label>
       </div>
       <button class="primary-button" type="submit">Salvar movimentação</button>

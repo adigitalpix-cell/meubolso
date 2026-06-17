@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.4";
+const APP_VERSION = "1.0.5";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -155,8 +155,15 @@ async function loadScopedDatabase(loggedUser) {
     supabaseSelect("tipos_conta", selectWithFilter(userFilter))
   ]);
   const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
+  if (isLoggedMaster) console.log("[Minhas Finanças][Supabase] SELECT usuarios master", usuarios.length, usuarios);
   logSupabaseLoad(loggedUser, loaded);
   return loaded;
+}
+
+async function refreshMasterData() {
+  const user = await loadUserById(session);
+  if (!user || user.role !== "master") throw new Error("Master não encontrado no Supabase.");
+  db = await loadScopedDatabase(user);
 }
 
 async function refreshCurrentUserData() {
@@ -731,7 +738,7 @@ function isMaster() {
 }
 
 function regularUsers() {
-  return db.users.filter(user => user.role === "user");
+  return isMaster() ? db.users : db.users.filter(user => user.role === "user");
 }
 
 function isExpired(user) {
@@ -837,6 +844,23 @@ function availableCardLimit(cardId = null) {
     ? Number(userCards().find(card => card.id === cardId)?.limit || 0)
     : totalCardLimit();
   return Math.max(limit - pendingPurchaseTotal(cardId), 0);
+}
+
+function invoiceClosingDate(cardId) {
+  const card = userCards().find(item => item.id === cardId);
+  const today = new Date(`${dateOffset()}T12:00:00`);
+  const closingDay = Number(card?.closingDay || today.getDate());
+  const closing = new Date(today);
+  closing.setDate(Math.min(closingDay, daysInMonth(closing.getFullYear(), closing.getMonth())));
+  if (today > closing) {
+    closing.setMonth(closing.getMonth() + 1);
+    closing.setDate(Math.min(closingDay, daysInMonth(closing.getFullYear(), closing.getMonth())));
+  }
+  return localDateKey(closing);
+}
+
+function daysInMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
 }
 
 function paidCardInstallments(targetMonth = monthKey()) {
@@ -1183,11 +1207,12 @@ function invoiceDetailRows() {
 function financialDashboard() {
   const current = monthKey();
   const items = dashboardTransactions();
-  const paidTransactions = items.filter(item => isPaidStatus(item));
   const monthTransactions = items.filter(item => item.dueDate?.slice(0, 7) === current);
   const monthIncome = monthTransactions.filter(item => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
   const monthExpense = monthTransactions.filter(item => item.type !== "income").reduce((sum, item) => sum + item.amount, 0);
-  const balance = paidTransactions.reduce((sum, item) => sum + (item.type === "income" ? item.amount : -item.amount), 0);
+  const confirmedIncome = items.filter(item => item.type === "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const confirmedExpenses = items.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const balance = confirmedIncome - confirmedExpenses;
   const today = dateOffset();
   const seven = dateOffset(7);
   const pendingBills = items.filter(item => item.status === "pending" && item.type !== "income");
@@ -1534,6 +1559,7 @@ function cardPurchasesTemplate() {
       <button class="secondary-button" data-view="card">Voltar</button>
       <button class="primary-button" data-new-purchase>Nova compra</button>
     </div>
+    <button class="primary-button invoice-pay-button" data-pay-invoice="${selectedCard.id}">Baixar Fatura</button>
     <div class="section-header"><h2>Compras</h2><span class="list-count">${purchases.length}</span></div>
     <div class="purchase-list">${purchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra cadastrada neste cartão.</div>`}</div>`;
 }
@@ -1578,6 +1604,7 @@ function cardFormTemplate() {
 
 function purchaseFormTemplate(cards) {
   const editing = editingPurchaseId ? userCardPurchases().find(purchase => purchase.id === editingPurchaseId) : null;
+  const card = cards.find(item => item.id === (editing?.cardId || selectedCardId)) || cards[0];
   return `
     <form class="admin-form" id="purchase-form">
       <h2>${editing ? "Editar compra" : "Nova compra"}</h2>
@@ -1587,7 +1614,7 @@ function purchaseFormTemplate(cards) {
       <label class="field"><span>Valor total</span><div class="money-input"><b>R$</b><input name="amount" required inputmode="decimal" value="${editing ? String(editing.amount).replace(".", ",") : ""}" placeholder="0,00"></div></label>
       <div class="form-grid">
         <label class="field"><span>Pagamento</span><select name="installments">${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${editing?.installments === index + 1 ? "selected" : ""}>${index === 0 ? "À vista" : `${index + 1}x`}</option>`).join("")}</select></label>
-        <label class="field"><span>Data da compra</span><input name="purchaseDate" required type="date" value="${editing?.purchaseDate || dateOffset()}"></label>
+        <div class="field"><span>Data de fechamento da fatura</span><div class="static-field" data-invoice-info>Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}</div></div>
       </div>
       <label class="field"><span class="field-title">Categoria <button class="mini-plus" type="button" data-manage-list="categories">+</button></span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
       <label class="field"><span>Status</span><select name="status"><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
@@ -1689,7 +1716,7 @@ function securityTemplate() {
     <div class="page-title"><span class="eyebrow">Proteção</span><h1>Segurança</h1><p>Informações de acesso e proteção local.</p></div>
     <article class="security-card">
       <h2>Armazenamento temporário</h2>
-      <p>Este protótipo usa armazenamento local do navegador. Não há banco online nesta etapa.</p>
+      <p>Seus dados principais são sincronizados com o Supabase. O cache local guarda apenas arquivos temporários do aplicativo.</p>
     </article>
     <article class="security-card">
       <h2>Conta atual</h2>
@@ -1873,6 +1900,7 @@ function hasUserFilters() {
 
 function userRow(user) {
   const status = accessStatus(user);
+  const daysLabel = user.role === "master" ? "Master" : Math.max(daysUntilExpiry(user), 0);
   return `
     <article class="user-card">
       <div class="user-main">
@@ -1880,7 +1908,7 @@ function userRow(user) {
         <div><strong>${escapeHtml(user.name)}</strong><small>@${escapeHtml(user.username)} · ${escapeHtml(user.whatsapp || "Sem WhatsApp")}</small></div>
         <span class="access-status ${status.className}">${status.label}</span>
       </div>
-      <div class="user-contact"><span>${escapeHtml(user.email || "Sem e-mail")}</span><span>Dias restantes: <b>${Math.max(daysUntilExpiry(user), 0)}</b></span></div>
+      <div class="user-contact"><span>${escapeHtml(user.email || "Sem e-mail")}</span><span>Dias restantes: <b>${daysLabel}</b></span></div>
       <div class="user-dates"><span>Cadastro <b>${formatDate(user.createdAt, true)}</b></span><span>Validade <b>${formatDate(user.accessExpiresAt, true)}</b></span></div>
       <div class="user-actions">
         <button data-edit-user="${user.id}">Editar</button>
@@ -1976,8 +2004,12 @@ function bindLogin() {
     }
     session = user.id;
     try {
-      db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
-      await refreshUserFinancialData();
+      if (user.role === "master") {
+        db = await loadScopedDatabase(user);
+      } else {
+        db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+        await refreshUserFinancialData();
+      }
     } catch (error) {
       session = null;
       return showToast("Não foi possível carregar os dados do usuário.");
@@ -2099,9 +2131,11 @@ function bindAppEvents() {
   });
   document.querySelector("#card-form")?.addEventListener("submit", saveCard);
   document.querySelector("#purchase-form")?.addEventListener("submit", saveCardPurchase);
+  document.querySelector("#purchase-form select[name='cardId']")?.addEventListener("change", updatePurchaseInvoiceInfo);
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
+  document.querySelector("[data-pay-invoice]")?.addEventListener("click", event => payCardInvoice(event.currentTarget.dataset.payInvoice));
   document.querySelectorAll("[data-open-card-purchases]").forEach(button => button.addEventListener("click", () => {
     selectedCardId = button.dataset.openCardPurchases;
     currentView = "cardPurchases";
@@ -2291,6 +2325,28 @@ function confirmCacheClear() {
   });
 }
 
+function confirmInvoicePayment(total) {
+  const dialog = document.querySelector("#confirm-dialog");
+  const title = dialog.querySelector("h2");
+  const message = dialog.querySelector("p");
+  const yesButton = dialog.querySelector("[data-confirm-yes]");
+  const noButton = dialog.querySelector("[data-confirm-no]");
+  const oldTitle = title.textContent;
+  const oldMessage = message.textContent;
+  const oldYes = yesButton.textContent;
+  const oldNo = noButton.textContent;
+  title.textContent = "Baixar Fatura";
+  message.textContent = `Valor total da fatura: ${money(total)}. Confirmar pagamento?`;
+  yesButton.textContent = "Baixar Fatura";
+  noButton.textContent = "Cancelar";
+  return confirmAction().finally(() => {
+    title.textContent = oldTitle;
+    message.textContent = oldMessage;
+    yesButton.textContent = oldYes;
+    noButton.textContent = oldNo;
+  });
+}
+
 function openTransactionDialog(type = "expense") {
   const dialog = document.querySelector("#transaction-dialog");
   const form = document.querySelector("#transaction-form");
@@ -2323,6 +2379,7 @@ function editTransaction(transactionId) {
   Object.entries(item).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value;
   });
+  togglePaymentFields();
   form.elements.amount.value = String(item.amount).replace(".", ",");
   document.querySelector("#form-title").textContent = "Editar transação";
   document.querySelector("#transaction-dialog").showModal();
@@ -2330,6 +2387,7 @@ function editTransaction(transactionId) {
 
 document.querySelector("[data-close-dialog]").addEventListener("click", () => document.querySelector("#transaction-dialog").close());
 document.querySelectorAll("#transaction-form input[name='type']").forEach(input => input.addEventListener("change", updateStatusOptions));
+document.querySelector("#transaction-form select[name='status']").addEventListener("change", togglePaymentFields);
 document.querySelector("#transaction-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (isMaster()) return;
@@ -2347,13 +2405,13 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     category: data.get("category"),
     account: data.get("account"),
     paymentMethod: data.get("paymentMethod"),
-    paidDate: data.get("paidDate"),
-    paidTime: data.get("paidTime")
+    paidDate: "",
+    paidTime: ""
   };
-  if (isPaidStatus(values) && (!values.paidDate || !values.paidTime)) {
+  if (isPaidStatus(values)) {
     const paidAt = nowParts();
-    values.paidDate ||= paidAt.date;
-    values.paidTime ||= paidAt.time;
+    values.paidDate = paidAt.date;
+    values.paidTime = paidAt.time;
   }
   db.transactions[session] ||= [];
   let savedItem;
@@ -2433,8 +2491,30 @@ function updateStatusOptions() {
   const isIncome = form.elements.type.value === "income";
   document.querySelector("#status-label").textContent = isIncome ? "Status da receita" : "Status";
   form.elements.status.innerHTML = isIncome
-    ? `<option value="received">Recebido</option><option value="pending">A receber</option>`
-    : `<option value="paid">Pago</option><option value="pending">Não pago</option>`;
+    ? `<option value="pending">A receber</option><option value="received">Recebido</option>`
+    : `<option value="pending">Não pago</option><option value="paid">Pago</option>`;
+  togglePaymentFields();
+}
+
+function togglePaymentFields() {
+  const form = document.querySelector("#transaction-form");
+  if (!form) return;
+  const paid = form.elements.status && (form.elements.status.value === "paid" || form.elements.status.value === "received");
+  document.querySelectorAll("#transaction-form .payment-extra").forEach(field => field.classList.toggle("hidden", !paid));
+  if (paid) {
+    const paidAt = nowParts();
+    form.elements.paidDate.value = paidAt.date;
+    form.elements.paidTime.value = paidAt.time;
+  } else {
+    form.elements.paidDate.value = "";
+    form.elements.paidTime.value = "";
+  }
+}
+
+function updatePurchaseInvoiceInfo(event) {
+  const card = userCards().find(item => item.id === event.currentTarget.value);
+  const target = document.querySelector("[data-invoice-info]");
+  if (target) target.textContent = `Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}`;
 }
 
 async function saveSupportTicket(event) {
@@ -2567,7 +2647,12 @@ async function saveUser(event) {
     db.accounts[newId] = [...DEFAULT_ACCOUNTS];
   }
   userFormOpen = false;
-  saveDatabase();
+  await saveDatabase();
+  try {
+    await refreshMasterData();
+  } catch (error) {
+    console.error("[Minhas Finanças][Supabase] erro ao recarregar usuários master", error);
+  }
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -2710,7 +2795,7 @@ async function saveCardPurchase(event) {
     name: data.get("name").trim(),
     amount,
     installments,
-    purchaseDate: data.get("purchaseDate"),
+    purchaseDate: invoiceClosingDate(data.get("cardId")),
     category: data.get("category").trim(),
     paidInstallments: []
   };
@@ -2855,6 +2940,38 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
   try {
     await savePurchaseToSupabase(purchase);
     const installmentTransactions = (db.transactions[session] || []).filter(item => item.sourcePurchaseId === purchase.id);
+    await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
+    await refreshUserFinancialData();
+  } catch (error) {
+    return showToast("Não foi possível salvar no Supabase.");
+  }
+  showToast("Operação realizada com sucesso.");
+  render();
+}
+
+async function payCardInvoice(cardId) {
+  if (isMaster()) return;
+  const pending = userCardPurchases().filter(purchase => purchase.cardId === cardId).map(purchase => ({ purchase, info: installmentInfo(purchase) })).filter(item => item.info.active && !item.info.paid);
+  const total = pending.reduce((sum, item) => sum + item.info.value, 0);
+  if (!pending.length || total <= 0) return showToast("Não há fatura pendente para este cartão.");
+  if (!await confirmInvoicePayment(total)) return;
+  const paidAt = nowParts();
+  const account = userCards().find(card => card.id === cardId)?.name || "Cartão";
+  pending.forEach(({ purchase, info }) => {
+    purchase.paidInstallments ||= [];
+    purchase.installmentPayments ||= {};
+    purchase.installmentPayments[info.key] = {
+      paidDate: paidAt.date,
+      paidTime: paidAt.time,
+      paymentMethod: "Cartão",
+      account
+    };
+    if (!purchase.paidInstallments.includes(info.key)) purchase.paidInstallments.push(info.key);
+    syncPaidInstallmentTransactions(purchase);
+  });
+  try {
+    await Promise.all(pending.map(({ purchase }) => savePurchaseToSupabase(purchase)));
+    const installmentTransactions = (db.transactions[session] || []).filter(item => pending.some(({ purchase }) => item.sourcePurchaseId === purchase.id));
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
     await refreshUserFinancialData();
   } catch (error) {
@@ -3108,8 +3225,12 @@ async function initializeApp() {
     if (session) {
       const user = await loadUserById(session);
       if (user) {
-        db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
-        await refreshUserFinancialData();
+        if (user.role === "master") {
+          db = await loadScopedDatabase(user);
+        } else {
+          db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+          await refreshUserFinancialData();
+        }
       } else {
         db = await loadDatabase();
       }
