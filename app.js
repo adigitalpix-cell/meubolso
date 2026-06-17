@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.15";
+const APP_VERSION = "1.0.17";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1592,11 +1592,9 @@ function cardPurchasesTemplate() {
       <div><strong>${escapeHtml(selectedCard.name)}</strong><span>${escapeHtml(selectedCard.brand)} · Fatura ${money(currentInvoice(selectedCard.id))}</span></div>
       <small>Limite disponível: ${money(availableCardLimit(selectedCard.id))}</small>
     </article>
-    <div class="card-actions-row">
+    <div class="card-actions-row single">
       <button class="secondary-button" data-view="card">Voltar</button>
-      <button class="primary-button" data-new-purchase>Nova compra</button>
     </div>
-    <button class="primary-button invoice-pay-button" data-pay-invoice="${selectedCard.id}">Baixar Fatura</button>
     <div class="section-header"><h2>Compras</h2><span class="list-count">${purchases.length}</span></div>
     <div class="purchase-list">${purchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra cadastrada neste cartão.</div>`}</div>`;
 }
@@ -1634,7 +1632,7 @@ function cardFormTemplate() {
         <label class="field"><span>Fechamento</span><input name="closingDay" required type="number" min="1" max="31" value="${editing?.closingDay || ""}" placeholder="20"></label>
         <label class="field"><span>Vencimento</span><input name="dueDay" required type="number" min="1" max="31" value="${editing?.dueDay || ""}" placeholder="10"></label>
       </div>
-      <button class="primary-button" type="submit">Salvar cartão</button>
+      <button class="primary-button card-save-button" type="submit">Salvar cartão</button>
     </div>`;
 }
 
@@ -1668,6 +1666,7 @@ function cardRow(card) {
       <div class="row-actions">
         <button type="button" data-open-card-purchases="${card.id}">Ver compras</button>
         <button type="button" data-edit-card="${card.id}">Editar</button>
+        <button type="button" class="invoice-action" data-pay-invoice="${card.id}">Pagar Fatura</button>
         <button type="button" class="danger" data-delete-card="${card.id}">Excluir</button>
       </div>
     </article>`;
@@ -2146,6 +2145,12 @@ function bindAppEvents() {
       openCardDialog();
       return;
     }
+    if (currentView === "cardPurchases") {
+      editingPurchaseId = null;
+      currentView = "purchaseEditor";
+      render();
+      return;
+    }
     openTransactionDialog(button.dataset.addType);
   }));
   document.querySelectorAll("[data-filter]").forEach(button => button.addEventListener("click", () => {
@@ -2160,11 +2165,6 @@ function bindAppEvents() {
     if (purchaseFormOpen) editingPurchaseId = null;
     render();
   });
-  document.querySelector("[data-new-purchase]")?.addEventListener("click", () => {
-    editingPurchaseId = null;
-    currentView = "purchaseEditor";
-    render();
-  });
   document.querySelector("#card-form")?.addEventListener("submit", saveCard);
   document.querySelector("[data-close-card-dialog]")?.addEventListener("click", closeCardDialog);
   document.querySelector("#purchase-form")?.addEventListener("submit", saveCardPurchase);
@@ -2172,7 +2172,7 @@ function bindAppEvents() {
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
-  document.querySelector("[data-pay-invoice]")?.addEventListener("click", event => payCardInvoice(event.currentTarget.dataset.payInvoice));
+  document.querySelectorAll("[data-pay-invoice]").forEach(button => button.addEventListener("click", event => payCardInvoice(event.currentTarget.dataset.payInvoice)));
   document.querySelectorAll("[data-open-card-purchases]").forEach(button => button.addEventListener("click", () => {
     selectedCardId = button.dataset.openCardPurchases;
     currentView = "cardPurchases";
@@ -2391,9 +2391,9 @@ function confirmInvoicePayment(total) {
   const oldMessage = message.textContent;
   const oldYes = yesButton.textContent;
   const oldNo = noButton.textContent;
-  title.textContent = "Baixar Fatura";
+  title.textContent = "Pagar Fatura";
   message.textContent = `Valor total da fatura: ${money(total)}. Confirmar pagamento?`;
-  yesButton.textContent = "Baixar Fatura";
+  yesButton.textContent = "Pagar Fatura";
   noButton.textContent = "Cancelar";
   return confirmAction().finally(() => {
     title.textContent = oldTitle;

@@ -7,6 +7,10 @@
   --green-dark: #112f27;
   --green-soft: #dfeee8;
   --lime: #d4f36b;
+  --quick-action: #d4f36b;
+  --quick-action-ring: #efffb1;
+  --card-blue: #153f6b;
+  --card-blue-soft: #e6f0fb;
   --red: #d14d4d;
   --red-soft: #fde9e7;
   --line: #e8ebe6;
@@ -162,10 +166,12 @@ button { cursor: pointer; }
 .nav-button.active { color: var(--green); }
 .fab {
   position: fixed; z-index: 25; left: 50%; bottom: 55px; transform: translateX(-50%);
-  width: 57px; height: 57px; border: 5px solid var(--paper); border-radius: 50%;
-  color: var(--green-dark); background: var(--lime); font-size: 31px; line-height: 1;
-  box-shadow: 0 8px 25px rgba(28, 64, 53, .23);
+  width: 59px; height: 59px; border: 5px solid var(--quick-action-ring); border-radius: 50%;
+  color: var(--green-dark); background: var(--quick-action); font-size: 33px; line-height: 1;
+  box-shadow: 0 12px 28px rgba(154, 190, 35, .42), 0 0 0 7px rgba(212, 243, 107, .18);
+  font-weight: 900;
 }
+.fab:active { transform: translateX(-50%) scale(.96); }
 
 .page-title { margin: 4px 2px 18px; }
 .page-title h1 { margin: 4px 0; font-size: 26px; letter-spacing: -.8px; }
@@ -250,8 +256,9 @@ button { cursor: pointer; }
 .purchase-row.overdue { border-color: #f3c8c8; background: #fff8f8; }
 .purchase-row button { min-height: 34px; border: 0; border-radius: 9px; color: var(--green); background: var(--green-soft); font-size: 10px; font-weight: 800; }
 .close-purchase { width: 100%; margin-top: 9px; }
-.row-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 10px; }
+.row-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 10px; }
 .row-actions button { min-height: 32px; border: 0; border-radius: 9px; color: var(--green); background: var(--green-soft); font-size: 9px; font-weight: 800; }
+.row-actions button.invoice-action { color: var(--card-blue); background: var(--card-blue-soft); }
 .row-actions button.danger { color: var(--red); background: var(--red-soft); }
 .due-list { display: grid; gap: 8px; }
 .due-row { padding: 12px; display: grid; grid-template-columns: 1fr auto; gap: 6px; border-radius: 14px; background: white; border: 1px solid var(--line); }
@@ -355,6 +362,10 @@ button { cursor: pointer; }
 .sheet-handle { width: 45px; height: 5px; margin: 0 auto 18px; border-radius: 10px; background: #daddd8; }
 .sheet-header { display: flex; justify-content: space-between; align-items: flex-start; }
 .sheet-header h2 { margin: 4px 0 19px; font-size: 23px; }
+.card-sheet .sheet-header h2 { color: var(--card-blue); }
+.card-sheet .sheet-handle { background: #bdd1e6; }
+.card-sheet .field > span, .card-sheet .field-title { color: var(--card-blue); }
+.card-save-button { background: var(--card-blue); box-shadow: 0 12px 28px rgba(21, 63, 107, .18); }
 .icon-button { width: 38px; height: 38px; border: 0; border-radius: 50%; background: var(--paper); color: var(--muted); font-size: 24px; }
 .type-selector { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; margin-bottom: 18px; }
 .type-selector input { display: none; }
