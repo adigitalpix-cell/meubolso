@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.13";
+const APP_VERSION = "1.0.14";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1576,9 +1576,6 @@ function cardTemplate() {
       </div>
       <div class="card-progress"><i style="width:${limit ? Math.min(usedLimit / limit * 100, 100) : 0}%"></i></div>
     </article>
-    <div class="card-actions-row single">
-      <button class="secondary-button" data-toggle-card-form>${cardFormOpen ? "Fechar cadastro" : "Novo cartão"}</button>
-    </div>
     ${cardFormOpen ? cardFormTemplate() : ""}
     <div class="section-header"><h2>Cartões cadastrados</h2><span class="list-count">${cards.length}</span></div>
     <div class="card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>`;
@@ -2148,6 +2145,12 @@ function bindAppEvents() {
   });
   document.querySelectorAll("[data-add], [data-add-type]").forEach(button => button.addEventListener("click", () => {
     if (isMaster()) return showToast("Apenas usuários podem cadastrar movimentações.");
+    if (currentView === "card") {
+      editingCardId = null;
+      cardFormOpen = true;
+      render();
+      return;
+    }
     openTransactionDialog(button.dataset.addType);
   }));
   document.querySelectorAll("[data-filter]").forEach(button => button.addEventListener("click", () => {
@@ -2157,11 +2160,6 @@ function bindAppEvents() {
   document.querySelectorAll("[data-edit-transaction]").forEach(button => button.addEventListener("click", () => editTransaction(button.dataset.editTransaction)));
   document.querySelectorAll("[data-delete-transaction]").forEach(button => button.addEventListener("click", () => deleteTransaction(button.dataset.deleteTransaction)));
   document.querySelectorAll("[data-pay-transaction]").forEach(button => button.addEventListener("click", () => markTransactionPaid(button.dataset.payTransaction)));
-  document.querySelector("[data-toggle-card-form]")?.addEventListener("click", () => {
-    cardFormOpen = !cardFormOpen;
-    if (cardFormOpen) editingCardId = null;
-    render();
-  });
   document.querySelector("[data-toggle-purchase-form]")?.addEventListener("click", () => {
     purchaseFormOpen = !purchaseFormOpen;
     if (purchaseFormOpen) editingPurchaseId = null;
