@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.11";
+const APP_VERSION = "1.0.12";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1741,10 +1741,10 @@ function profileTemplate() {
         <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
       <div class="app-version-actions">
-        <button type="button" class="install-app-button ${deferredInstallPrompt ? "" : "hidden"}" data-install-app>Instalar aplicativo</button>
         <button type="button" data-check-updates>Verificar Atualizações</button>
-        <button type="button" data-clear-cache>Limpar Cache</button>
+        <button type="button" class="install-app-button ${canShowInstallButton() ? "" : "hidden"}" data-install-app>Instalar App</button>
       </div>
+      <div class="app-version-extra"><button type="button" data-clear-cache>Limpar Cache</button></div>
     </article>
     <div class="menu-list">
       ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
@@ -2333,6 +2333,9 @@ async function clearAppCache() {
 }
 
 async function installApp() {
+  if (isStandaloneApp()) {
+    return showToast("Aplicativo já instalado.");
+  }
   if (!deferredInstallPrompt) {
     return showToast("Use a opção Adicionar à tela inicial do navegador.");
   }
@@ -2340,6 +2343,14 @@ async function installApp() {
   await deferredInstallPrompt.userChoice.catch(() => null);
   deferredInstallPrompt = null;
   render();
+}
+
+function isStandaloneApp() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function canShowInstallButton() {
+  return Boolean(deferredInstallPrompt) && !isStandaloneApp();
 }
 
 async function updateServiceWorker() {
@@ -3365,6 +3376,7 @@ async function initializeApp() {
 
 window.addEventListener("beforeinstallprompt", event => {
   event.preventDefault();
+  if (isStandaloneApp()) return;
   deferredInstallPrompt = event;
   render();
 });
