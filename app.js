@@ -1,12 +1,13 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.8";
+const APP_VERSION = "1.0.9";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
 const DEFAULT_CATEGORIES = ["Alimentação", "Moradia", "Transporte", "Saúde", "Educação", "Lazer", "Salário", "Outros"];
 const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "Poupança", "Carteira", "Mercado Pago"];
 const SUPPORT_STATUSES = { pending: "Pendente", progress: "Em Atendimento", resolved: "Resolvido" };
+let deferredInstallPrompt = null;
 
 const seed = {
   users: [
@@ -1712,6 +1713,7 @@ function profileTemplate() {
         <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
       <div class="app-version-actions">
+        <button type="button" class="install-app-button ${deferredInstallPrompt ? "" : "hidden"}" data-install-app>Instalar aplicativo</button>
         <button type="button" data-check-updates>Verificar Atualizações</button>
         <button type="button" data-clear-cache>Limpar Cache</button>
       </div>
@@ -2181,6 +2183,7 @@ function bindAppEvents() {
   });
   document.querySelector("[data-clear-cache]")?.addEventListener("click", clearAppCache);
   document.querySelector("[data-check-updates]")?.addEventListener("click", checkAppUpdates);
+  document.querySelector("[data-install-app]")?.addEventListener("click", installApp);
   document.querySelector("#user-form")?.addEventListener("submit", saveUser);
   document.querySelector("[data-new-user]")?.addEventListener("click", () => {
     editingUserId = null;
@@ -2300,6 +2303,16 @@ async function clearAppCache() {
     console.error("[Minhas Finanças][PWA] erro ao limpar cache", error);
     showToast("Não foi possível concluir a operação.");
   }
+}
+
+async function installApp() {
+  if (!deferredInstallPrompt) {
+    return showToast("Use a opção Adicionar à tela inicial do navegador.");
+  }
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice.catch(() => null);
+  deferredInstallPrompt = null;
+  render();
 }
 
 async function updateServiceWorker() {
@@ -3315,5 +3328,17 @@ async function initializeApp() {
     render();
   }
 }
+
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  render();
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  showToast("Aplicativo instalado com sucesso.");
+  render();
+});
 
 initializeApp();

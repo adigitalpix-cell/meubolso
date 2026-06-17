@@ -1,48 +1,22 @@
-# Minhas Finanças
+# Migração para Supabase
 
-Aplicativo financeiro PWA para controle de usuários, receitas, despesas, cartões, compras parceladas, parcelas e suporte.
+Este diretório prepara a estrutura online do app Minhas Finanças.
 
-## Publicação na Vercel
+## Arquivos
 
-Este projeto é estático. Para publicar:
+- `schema.sql`: cria as tabelas `usuarios`, `receitas`, `despesas`, `cartoes`, `compras_cartao`, `parcelas`, `suporte`, `renovacoes` e tabelas auxiliares de categorias/tipos de conta.
+- `config.example.js`: modelo para informar a URL e a chave pública do projeto Supabase.
 
-1. Envie os arquivos do projeto para um repositório GitHub.
-2. Na Vercel, importe o repositório.
-3. Framework Preset: `Other`.
-4. Build Command: deixe vazio.
-5. Output Directory: deixe vazio ou use a raiz.
-6. Deploy.
+## Como aplicar no Supabase
 
-## Supabase
+1. Abra o painel do Supabase.
+2. Entre em SQL Editor.
+3. Cole e execute o conteúdo de `schema.sql`.
+4. Copie `config.example.js` para `supabase-config.js`.
+5. Preencha `url` e `anonKey` com os dados reais do projeto.
 
-Antes de usar o app, execute o SQL em:
+## Observação de segurança
 
-```txt
-supabase/schema.sql
-```
+O app usa login por nome de usuário e senha própria. Para garantir que cada usuário veja apenas seus dados no Supabase, a etapa seguinte precisa ligar esse login a uma camada segura de autenticação.
 
-O arquivo de conexão usado pelo app é:
-
-```txt
-supabase-config.js
-```
-
-Ele precisa ficar na raiz do projeto, no mesmo nível do `index.html`.
-
-## Arquivos principais
-
-```txt
-index.html
-app.js
-styles.css
-supabase-config.js
-manifest.webmanifest
-sw.js
-vercel.json
-icons/
-supabase/
-```
-
-## Observação
-
-O app usa Supabase via REST API e sincroniza os dados por `usuario_id`.
+Sem isso, qualquer proteção feita apenas no JavaScript do navegador não é suficiente para dados reais de clientes, porque a chave pública do Supabase fica visível no aplicativo.
