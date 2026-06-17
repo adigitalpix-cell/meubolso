@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.5";
+const APP_VERSION = "1.0.6";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -2379,7 +2379,6 @@ function editTransaction(transactionId) {
   Object.entries(item).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value;
   });
-  togglePaymentFields();
   form.elements.amount.value = String(item.amount).replace(".", ",");
   document.querySelector("#form-title").textContent = "Editar transação";
   document.querySelector("#transaction-dialog").showModal();
@@ -2387,7 +2386,6 @@ function editTransaction(transactionId) {
 
 document.querySelector("[data-close-dialog]").addEventListener("click", () => document.querySelector("#transaction-dialog").close());
 document.querySelectorAll("#transaction-form input[name='type']").forEach(input => input.addEventListener("change", updateStatusOptions));
-document.querySelector("#transaction-form select[name='status']").addEventListener("change", togglePaymentFields);
 document.querySelector("#transaction-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (isMaster()) return;
@@ -2404,12 +2402,13 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     status: data.get("status"),
     category: data.get("category"),
     account: data.get("account"),
-    paymentMethod: data.get("paymentMethod"),
+    paymentMethod: "",
     paidDate: "",
     paidTime: ""
   };
   if (isPaidStatus(values)) {
     const paidAt = nowParts();
+    values.paymentMethod = "Automático";
     values.paidDate = paidAt.date;
     values.paidTime = paidAt.time;
   }
@@ -2456,7 +2455,7 @@ async function markTransactionPaid(transactionId) {
   const paidAt = nowParts();
   item.paidDate = paidAt.date;
   item.paidTime = paidAt.time;
-  item.paymentMethod ||= "Não informado";
+  item.paymentMethod = "Automático";
   try {
     await saveTransactionToSupabase(item);
     await refreshUserFinancialData();
@@ -2493,22 +2492,6 @@ function updateStatusOptions() {
   form.elements.status.innerHTML = isIncome
     ? `<option value="pending">A receber</option><option value="received">Recebido</option>`
     : `<option value="pending">Não pago</option><option value="paid">Pago</option>`;
-  togglePaymentFields();
-}
-
-function togglePaymentFields() {
-  const form = document.querySelector("#transaction-form");
-  if (!form) return;
-  const paid = form.elements.status && (form.elements.status.value === "paid" || form.elements.status.value === "received");
-  document.querySelectorAll("#transaction-form .payment-extra").forEach(field => field.classList.toggle("hidden", !paid));
-  if (paid) {
-    const paidAt = nowParts();
-    form.elements.paidDate.value = paidAt.date;
-    form.elements.paidTime.value = paidAt.time;
-  } else {
-    form.elements.paidDate.value = "";
-    form.elements.paidTime.value = "";
-  }
 }
 
 function updatePurchaseInvoiceInfo(event) {
