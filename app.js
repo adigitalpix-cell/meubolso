@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.14";
+const APP_VERSION = "1.0.15";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -62,7 +62,6 @@ let reportUserId = "all";
 let reportPeriod = "monthly";
 let reportMonth = new Date().toISOString().slice(0, 7);
 let reportYear = String(new Date().getFullYear());
-let cardFormOpen = false;
 let purchaseFormOpen = false;
 let selectedCardId = null;
 let editingCardId = null;
@@ -1576,7 +1575,6 @@ function cardTemplate() {
       </div>
       <div class="card-progress"><i style="width:${limit ? Math.min(usedLimit / limit * 100, 100) : 0}%"></i></div>
     </article>
-    ${cardFormOpen ? cardFormTemplate() : ""}
     <div class="section-header"><h2>Cartões cadastrados</h2><span class="list-count">${cards.length}</span></div>
     <div class="card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>`;
 }
@@ -1627,8 +1625,7 @@ function installmentsTemplate() {
 function cardFormTemplate() {
   const editing = editingCardId ? userCards().find(card => card.id === editingCardId) : null;
   return `
-    <form class="admin-form" id="card-form">
-      <h2>${editing ? "Editar cartão" : "Novo cartão"}</h2>
+    <div class="card-modal-fields">
       <input type="hidden" name="id" value="${editing?.id || ""}">
       <label class="field"><span>Nome do cartão</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Nubank"></label>
       <label class="field"><span>Bandeira</span><select name="brand">${["Visa","Mastercard","Elo","American Express","Outro"].map(brand => `<option ${editing?.brand === brand ? "selected" : ""}>${brand}</option>`).join("")}</select></label>
@@ -1637,8 +1634,8 @@ function cardFormTemplate() {
         <label class="field"><span>Fechamento</span><input name="closingDay" required type="number" min="1" max="31" value="${editing?.closingDay || ""}" placeholder="20"></label>
         <label class="field"><span>Vencimento</span><input name="dueDay" required type="number" min="1" max="31" value="${editing?.dueDay || ""}" placeholder="10"></label>
       </div>
-      <button class="primary-button">${editing ? "Salvar cartão" : "Salvar cartão"}</button>
-    </form>`;
+      <button class="primary-button" type="submit">Salvar cartão</button>
+    </div>`;
 }
 
 function purchaseFormTemplate(cards) {
@@ -2146,9 +2143,7 @@ function bindAppEvents() {
   document.querySelectorAll("[data-add], [data-add-type]").forEach(button => button.addEventListener("click", () => {
     if (isMaster()) return showToast("Apenas usuários podem cadastrar movimentações.");
     if (currentView === "card") {
-      editingCardId = null;
-      cardFormOpen = true;
-      render();
+      openCardDialog();
       return;
     }
     openTransactionDialog(button.dataset.addType);
@@ -2171,6 +2166,7 @@ function bindAppEvents() {
     render();
   });
   document.querySelector("#card-form")?.addEventListener("submit", saveCard);
+  document.querySelector("[data-close-card-dialog]")?.addEventListener("click", closeCardDialog);
   document.querySelector("#purchase-form")?.addEventListener("submit", saveCardPurchase);
   document.querySelector("#purchase-form select[name='cardId']")?.addEventListener("change", updatePurchaseInvoiceInfo);
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
@@ -2183,9 +2179,7 @@ function bindAppEvents() {
     render();
   }));
   document.querySelectorAll("[data-edit-card]").forEach(button => button.addEventListener("click", () => {
-    editingCardId = button.dataset.editCard;
-    cardFormOpen = true;
-    render();
+    openCardDialog(button.dataset.editCard);
   }));
   document.querySelectorAll("[data-delete-card]").forEach(button => button.addEventListener("click", () => deleteCard(button.dataset.deleteCard)));
   document.querySelectorAll("[data-edit-purchase]").forEach(button => button.addEventListener("click", () => {
@@ -2420,6 +2414,22 @@ function openTransactionDialog(type = "expense") {
   form.elements.type.value = type === "income" ? "income" : "expense";
   updateStatusOptions();
   dialog.showModal();
+}
+
+function openCardDialog(cardId = null) {
+  editingCardId = cardId;
+  const dialog = document.querySelector("#card-dialog");
+  const title = document.querySelector("#card-form-title");
+  const body = document.querySelector("#card-form-body");
+  if (!dialog || !title || !body) return;
+  title.textContent = cardId ? "Editar cartão" : "Novo cartão";
+  body.innerHTML = cardFormTemplate();
+  dialog.showModal();
+}
+
+function closeCardDialog() {
+  document.querySelector("#card-dialog")?.close();
+  editingCardId = null;
 }
 
 function editTransaction(transactionId) {
@@ -2850,8 +2860,9 @@ async function saveCard(event) {
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
-  cardFormOpen = false;
-  showToast("Operação realizada com sucesso.");
+  document.querySelector("#card-dialog")?.close();
+  editingCardId = null;
+  showToast("Cartão salvo com sucesso.");
   render();
 }
 
