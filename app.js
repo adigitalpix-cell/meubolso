@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.10";
+const APP_VERSION = "1.0.11";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -44,7 +44,7 @@ const seed = {
 };
 
 let db = normalizeDatabase(structuredClone(seed));
-let session = sessionStorage.getItem(SESSION_KEY);
+let session = loadSavedSession()?.id || null;
 let isBooting = true;
 let lastSyncError = "";
 let currentView = "home";
@@ -128,6 +128,36 @@ function normalizeDatabase(data = structuredClone(seed)) {
     });
   });
   return data;
+}
+
+function loadSavedSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    return saved?.id ? saved : null;
+  } catch {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+}
+
+function saveSession(user) {
+  if (!user?.id) return;
+  session = user.id;
+  localStorage.setItem(SESSION_KEY, JSON.stringify({
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    role: user.role,
+    status: user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : "ativo",
+    accessExpiresAt: user.accessExpiresAt || "",
+    savedAt: new Date().toISOString()
+  }));
+}
+
+function clearSession() {
+  session = null;
+  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 async function loadDatabase() {
@@ -976,16 +1006,14 @@ function render() {
   }
   const user = currentUser();
   if (!user) {
-    session = null;
-    sessionStorage.removeItem(SESSION_KEY);
+    clearSession();
     app.innerHTML = authView === "register" ? registerTemplate() : loginTemplate();
     bindLogin();
     return;
   }
 
   if (user.role === "user" && isAccessBlocked(user)) {
-    session = null;
-    sessionStorage.removeItem(SESSION_KEY);
+    clearSession();
     authView = "login";
     app.innerHTML = loginTemplate("Seu acesso expirou. Entre em contato com o administrador.");
     bindLogin();
@@ -2027,11 +2055,11 @@ function bindLogin() {
         await refreshUserFinancialData();
       }
     } catch (error) {
-      session = null;
+      clearSession();
       return showToast("Não foi possível carregar os dados do usuário.");
     }
     currentView = "home";
-    sessionStorage.setItem(SESSION_KEY, session);
+    saveSession(user);
     render();
   });
   document.querySelector("#register-form")?.addEventListener("submit", registerUser);
@@ -2084,7 +2112,7 @@ async function registerUser(event) {
   session = newId;
   authView = "login";
   currentView = "home";
-  sessionStorage.setItem(SESSION_KEY, session);
+  saveSession(newUser);
   try {
     await refreshCurrentUserData();
   } catch (error) {
@@ -2272,8 +2300,7 @@ function bindReportEvents() {
 }
 
 function logout() {
-  sessionStorage.removeItem(SESSION_KEY);
-  session = null;
+  clearSession();
   currentView = "home";
   authView = "login";
   render();
@@ -3305,6 +3332,13 @@ async function initializeApp() {
     if (session) {
       const user = await loadUserById(session);
       if (user) {
+        if (isAccessBlocked(user)) {
+          clearSession();
+          db = await loadDatabase();
+          authView = "login";
+          return;
+        }
+        saveSession(user);
         if (user.role === "master") {
           db = await loadScopedDatabase(user);
         } else {
@@ -3312,14 +3346,14 @@ async function initializeApp() {
           await refreshUserFinancialData();
         }
       } else {
+        clearSession();
         db = await loadDatabase();
       }
     } else {
       db = await loadDatabase();
     }
     if (session && !currentUser()) {
-      session = null;
-      sessionStorage.removeItem(SESSION_KEY);
+      clearSession();
     }
   } catch (error) {
     lastSyncError = error.message;
