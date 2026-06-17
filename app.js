@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.6";
+const APP_VERSION = "1.0.7";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -2828,7 +2828,10 @@ async function saveCardPurchase(event) {
     return showToast("Não foi possível salvar no Supabase.");
   }
   purchaseFormOpen = false;
-  showToast("Operação realizada com sucesso.");
+  editingPurchaseId = null;
+  selectedCardId = savedPurchase.cardId;
+  currentView = "cardPurchases";
+  showToast("Compra salva com sucesso.");
   render();
 }
 
