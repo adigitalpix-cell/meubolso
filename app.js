@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.17";
+const APP_VERSION = "1.0.18";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -346,10 +346,13 @@ async function supabaseRequest(table, { method = "GET", query = "", body = null,
   const separator = query ? `?${query}` : "";
   const response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${table}${separator}`, {
     method,
+    cache: "no-store",
     headers: {
       apikey: SUPABASE_CONFIG.anonKey,
       Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
       "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
       Prefer: prefer
     },
     body: body ? JSON.stringify(body) : null
@@ -3100,7 +3103,12 @@ async function closePurchase(purchaseId) {
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
   if (!purchase || !allInstallmentsPaid(purchase)) return showToast("Não foi possível concluir a operação.");
   purchase.closed = true;
-  saveDatabase();
+  try {
+    await savePurchaseToSupabase(purchase);
+    await refreshUserFinancialData();
+  } catch (error) {
+    return showToast("Não foi possível salvar no Supabase.");
+  }
   showToast("Operação realizada com sucesso.");
   render();
 }
