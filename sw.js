@@ -1,4 +1,4 @@
-const CACHE_NAME = "minhas-financas-v1.0.0.24";
+const CACHE_NAME = "minhas-financas-v1.0.0.25";
 const ASSETS = [
   "/",
   "/index.html",
@@ -37,4 +37,28 @@ self.addEventListener("fetch", event => {
 
 self.addEventListener("message", event => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
+
+self.addEventListener("push", event => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data?.text() || "Você tem uma nova atualização financeira." };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Meu Bolso", {
+      body: data.body || "Você tem uma nova atualização financeira.",
+      icon: "/icon-192.svg",
+      badge: "/icon-192.svg",
+      tag: data.tag || "meu-bolso-notification",
+      data: { url: data.url || "/" }
+    })
+  );
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const url = event.notification.data?.url || "/";
+  event.waitUntil(clients.openWindow(url));
 });

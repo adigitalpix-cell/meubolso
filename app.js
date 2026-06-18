@@ -1,8 +1,9 @@
 const SESSION_KEY = "minhas-financas-session";
 const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
+const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.24";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.25";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1870,10 +1871,8 @@ function profileTemplate() {
         <p>Versão ${escapeHtml(APP_VERSION)}</p>
         <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
-      <div class="app-version-actions">
-        ${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}
-        <button type="button" class="install-app-button ${canShowInstallButton() ? "" : "hidden"}" data-install-app>Instalar App</button>
-      </div>
+      ${profileVersionActionsTemplate()}
+      ${notificationBlockedNotice()}
     </article>
     <div class="menu-list">
       ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
@@ -2338,7 +2337,7 @@ function bindAppEvents() {
     if (await confirmAction()) logout();
   });
   document.querySelector("[data-check-updates]")?.addEventListener("click", checkAppUpdates);
-  document.querySelector("[data-install-app]")?.addEventListener("click", installApp);
+  document.querySelector("[data-smart-install]")?.addEventListener("click", handleSmartInstall);
   document.querySelector("#user-form")?.addEventListener("submit", saveUser);
   document.querySelector("[data-new-user]")?.addEventListener("click", () => {
     editingUserId = null;
@@ -2473,27 +2472,103 @@ async function clearAppCache() {
   }
 }
 
-async function installApp() {
-  if (isStandaloneApp()) {
-    return showToast("Aplicativo já instalado.");
-  }
-  if (!deferredInstallPrompt) {
-    return showToast("Use a opção Adicionar à tela inicial do navegador.");
-  }
-  deferredInstallPrompt.prompt();
-  await deferredInstallPrompt.userChoice.catch(() => null);
-  deferredInstallPrompt = null;
-  render();
-}
-
 function isStandaloneApp() {
   return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
 }
 
-function canShowInstallButton() {
-  return Boolean(deferredInstallPrompt) && !isStandaloneApp();
+function notificationsSupported() {
+  return "Notification" in window && "serviceWorker" in navigator;
 }
 
+function notificationPermission() {
+  return notificationsSupported() ? Notification.permission : "unsupported";
+}
+
+function notificationBlockedNotice() {
+  if (isMaster() || notificationPermission() !== "denied") return "";
+  return `<small class="notification-warning">Notificações bloqueadas. Ative nas configurações do navegador.</small>`;
+}
+
+function profileVersionActionsTemplate() {
+  const actions = `${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}${smartInstallButtonTemplate()}`;
+  return actions ? `<div class="app-version-actions">${actions}</div>` : "";
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map(character => character.charCodeAt(0)));
+}
+
+function smartInstallButtonTemplate() {
+  if (isMaster()) return "";
+  if (!isStandaloneApp()) {
+    return `<button type="button" class="install-app-button" data-smart-install>Instalar App</button>`;
+  }
+  if (notificationPermission() === "default") {
+    return `<button type="button" class="install-app-button" data-smart-install>Ativar Notificações</button>`;
+  }
+  return "";
+}
+
+async function handleSmartInstall() {
+  if (isMaster()) return;
+  if (!isStandaloneApp()) {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice.catch(() => null);
+      deferredInstallPrompt = null;
+      if (choice?.outcome === "accepted") await activateNotifications();
+      render();
+      return;
+    }
+    showToast("Use a opção Adicionar à tela inicial do navegador.");
+    return;
+  }
+  await activateNotifications();
+}
+
+async function activateNotifications() {
+  if (!notificationsSupported()) {
+    showToast("Notificações indisponíveis neste navegador.");
+    return;
+  }
+  if (Notification.permission === "denied") {
+    localStorage.setItem(NOTIFICATION_BLOCK_NOTICE_KEY, "1");
+    showToast("Notificações bloqueadas. Ative nas configurações do navegador.");
+    render();
+    return;
+  }
+  const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") {
+    localStorage.setItem(NOTIFICATION_BLOCK_NOTICE_KEY, "1");
+    showToast("Notificações bloqueadas. Ative nas configurações do navegador.");
+    render();
+    return;
+  }
+  localStorage.removeItem(NOTIFICATION_BLOCK_NOTICE_KEY);
+  const registration = await navigator.serviceWorker.ready.catch(() => null);
+  const pushPublicKey = window.APP_BUILD_CONFIG?.pushPublicKey;
+  if (registration?.pushManager && pushPublicKey) {
+    const existingSubscription = await registration.pushManager.getSubscription();
+    const subscription = existingSubscription || await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(pushPublicKey)
+    });
+    localStorage.setItem("minhas-financas-push-subscription", JSON.stringify(subscription));
+  }
+  if (registration?.showNotification) {
+    await registration.showNotification("Notificações ativadas", {
+      body: "Você receberá avisos importantes do Meu Bolso.",
+      icon: "/icon-192.svg",
+      badge: "/icon-192.svg",
+      tag: "notifications-enabled"
+    }).catch(() => null);
+  }
+  showToast("Notificações ativadas com sucesso.");
+  render();
+}
 async function updateServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   const registrations = await navigator.serviceWorker.getRegistrations();
