@@ -1,6 +1,8 @@
 const SESSION_KEY = "minhas-financas-session";
+const LOCAL_DB_KEY = "minhas-financas-local-db";
+const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.21";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.22";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -9,6 +11,8 @@ const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "Poupança", "Carteira",
 const SUPPORT_STATUSES = { pending: "Pendente", progress: "Em Atendimento", resolved: "Resolvido" };
 let deferredInstallPrompt = null;
 let serviceWorkerReloading = false;
+let isOfflineMode = !navigator.onLine;
+let isSyncingOfflineQueue = false;
 
 const seed = {
   users: [
@@ -160,14 +164,69 @@ function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+function cacheDatabase() {
+  try {
+    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify({ db, cachedAt: new Date().toISOString() }));
+  } catch (error) {
+    console.warn("[Minhas Finanças][Offline] não foi possível salvar cache local", error);
+  }
+}
+
+function loadCachedDatabase() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(LOCAL_DB_KEY) || "null");
+    return cached?.db ? normalizeDatabase(cached.db) : null;
+  } catch {
+    localStorage.removeItem(LOCAL_DB_KEY);
+    return null;
+  }
+}
+
+function offlineQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+  } catch {
+    localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    return [];
+  }
+}
+
+function saveOfflineQueue(queue) {
+  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+}
+
+function queueSupabaseOperation(operation) {
+  const queue = offlineQueue();
+  queue.push({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...operation });
+  saveOfflineQueue(queue);
+  isOfflineMode = true;
+  cacheDatabase();
+}
+
+function hasOfflineQueue() {
+  return offlineQueue().length > 0;
+}
+
+function isNetworkError(error) {
+  return !navigator.onLine || error?.name === "TypeError" || /fetch|network|failed/i.test(error?.message || "");
+}
+
 async function loadDatabase() {
   if (!SUPABASE_READY) throw new Error("Supabase não configurado.");
+  const cached = loadCachedDatabase();
+  if (!navigator.onLine && cached) {
+    isOfflineMode = true;
+    return cached;
+  }
   if (session) {
     const user = await loadUserById(session);
     if (user) return loadScopedDatabase(user);
   }
   const usuarios = await supabaseSelect("usuarios", "select=*");
-  return normalizeDatabase(fromSupabaseRows({ usuarios, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+  const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+  db = loaded;
+  cacheDatabase();
+  return loaded;
 }
 
 async function loadScopedDatabase(loggedUser) {
@@ -188,6 +247,9 @@ async function loadScopedDatabase(loggedUser) {
   const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
   if (isLoggedMaster) console.log("[Minhas Finanças][Supabase] SELECT usuarios master", usuarios.length, usuarios);
   logSupabaseLoad(loggedUser, loaded);
+  isOfflineMode = false;
+  db = loaded;
+  cacheDatabase();
   return loaded;
 }
 
@@ -204,6 +266,11 @@ async function refreshCurrentUserData() {
 }
 
 async function refreshUserFinancialData() {
+  if (!navigator.onLine) {
+    isOfflineMode = true;
+    cacheDatabase();
+    return;
+  }
   const user = currentUser() || await loadUserById(session);
   if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
   const filter = `usuario_id=eq.${session}`;
@@ -235,6 +302,8 @@ async function refreshUserFinancialData() {
   db.cardPurchases[session] = loaded.cardPurchases[session] || [];
   db.categories[session] = loaded.categories[session] || [...DEFAULT_CATEGORIES];
   db.accounts[session] = loaded.accounts[session] || [...DEFAULT_ACCOUNTS];
+  isOfflineMode = false;
+  cacheDatabase();
   logSupabaseLoad(user, db);
 }
 
@@ -344,20 +413,33 @@ async function supabaseSelect(table, query = "select=*") {
 }
 
 async function supabaseRequest(table, { method = "GET", query = "", body = null, prefer = "return=representation" } = {}) {
+  if (method !== "GET" && !navigator.onLine) {
+    queueSupabaseOperation({ table, method, query, body, prefer });
+    return [];
+  }
   const separator = query ? `?${query}` : "";
-  const response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${table}${separator}`, {
-    method,
-    cache: "no-store",
-    headers: {
-      apikey: SUPABASE_CONFIG.anonKey,
-      Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
-      "Content-Type": "application/json",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      Prefer: prefer
-    },
-    body: body ? JSON.stringify(body) : null
-  });
+  let response;
+  try {
+    response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${table}${separator}`, {
+      method,
+      cache: "no-store",
+      headers: {
+        apikey: SUPABASE_CONFIG.anonKey,
+        Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+        Prefer: prefer
+      },
+      body: body ? JSON.stringify(body) : null
+    });
+  } catch (error) {
+    if (method !== "GET" && isNetworkError(error)) {
+      queueSupabaseOperation({ table, method, query, body, prefer });
+      return [];
+    }
+    throw error;
+  }
   if (!response.ok) {
     const message = await response.text();
     console.error("[Minhas Finanças][Supabase] erro", table, response.status, message);
@@ -366,6 +448,48 @@ async function supabaseRequest(table, { method = "GET", query = "", body = null,
   if (response.status === 204) return [];
   const text = await response.text();
   return text ? JSON.parse(text) : [];
+}
+
+async function syncOfflineQueue() {
+  if (isSyncingOfflineQueue || !navigator.onLine || !SUPABASE_READY || !hasOfflineQueue()) return;
+  isSyncingOfflineQueue = true;
+  const queue = offlineQueue().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const remaining = [];
+  try {
+    for (const operation of queue) {
+      const separator = operation.query ? `?${operation.query}` : "";
+      const response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${operation.table}${separator}`, {
+        method: operation.method,
+        cache: "no-store",
+        headers: {
+          apikey: SUPABASE_CONFIG.anonKey,
+          Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+          Prefer: operation.prefer || "return=minimal"
+        },
+        body: operation.body ? JSON.stringify(operation.body) : null
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }
+    saveOfflineQueue([]);
+    isOfflineMode = false;
+    if (session) {
+      if (isMaster()) await refreshMasterData();
+      else await refreshUserFinancialData();
+      render();
+    }
+    showToast("Dados sincronizados com sucesso.");
+  } catch (error) {
+    console.error("[Minhas Finanças][Offline] erro ao sincronizar fila", error);
+    remaining.push(...queue);
+    saveOfflineQueue(remaining);
+    isOfflineMode = true;
+    showToast("Não foi possível sincronizar agora. Tentaremos novamente em breve.");
+  } finally {
+    isSyncingOfflineQueue = false;
+  }
 }
 
 function fromSupabaseRows(rows) {
@@ -1000,11 +1124,14 @@ function render() {
       <section class="login-page">
         <form class="login-card">
           <h2>Não foi possível conectar</h2>
-          <div class="login-alert">Verifique o Supabase e tente novamente.</div>
+          <div class="login-alert">Verifique sua conexão e tente novamente.</div>
           <button class="primary-button" type="button" data-retry-sync>Tentar novamente</button>
         </form>
       </section>`;
-    document.querySelector("[data-retry-sync]")?.addEventListener("click", initializeApp);
+    document.querySelector("[data-retry-sync]")?.addEventListener("click", async () => {
+      await syncOfflineQueue();
+      initializeApp();
+    });
     return;
   }
   const user = currentUser();
@@ -1083,6 +1210,7 @@ function shellTemplate() {
         <div><span class="eyebrow">${greeting()}</span><h1 class="hello">${escapeHtml(user.name.split(" ")[0])}</h1></div>
         <button class="avatar" data-view="profile">${initials(user.name)}</button>
       </header>
+      ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
       ${user.role === "user" ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
       <nav class="bottom-nav">
@@ -2035,7 +2163,7 @@ function bindLogin() {
     try {
       user = await loadUserByCredentials(username, password);
     } catch (error) {
-      return showToast("Não foi possível conectar ao Supabase.");
+      return showToast("Não foi possível conectar. Verifique sua internet.");
     }
     if (!user) return showToast("Usuário ou senha incorretos.");
     if (isAccessBlocked(user)) {
@@ -2315,6 +2443,7 @@ async function checkAppUpdates() {
 
 async function autoCheckAppUpdates() {
   try {
+    await syncOfflineQueue();
     await updateServiceWorker();
     if (session) {
       if (isMaster()) await refreshMasterData();
@@ -2532,6 +2661,8 @@ async function deleteTransaction(transactionId) {
   if (!item) return showToast("Não foi possível concluir a operação.");
   try {
     await deleteRowById(item.type === "income" ? "receitas" : "despesas", item.id);
+    db.transactions[session] = (db.transactions[session] || []).filter(transaction => transaction.id !== transactionId);
+    cacheDatabase();
     await refreshUserFinancialData();
   } catch (error) {
     return showDeleteError(error);
@@ -3023,6 +3154,10 @@ async function deleteCard(cardId) {
   if (!card) return showToast("Não foi possível concluir a operação.");
   try {
     await deleteCardCascade(cardId);
+    db.cards[session] = (db.cards[session] || []).filter(item => item.id !== cardId);
+    db.cardPurchases[session] = (db.cardPurchases[session] || []).filter(item => item.cardId !== cardId);
+    db.transactions[session] = (db.transactions[session] || []).filter(item => item.cardId !== cardId);
+    cacheDatabase();
     await refreshUserFinancialData();
   } catch (error) {
     return showDeleteError(error);
@@ -3045,6 +3180,9 @@ async function deletePurchase(purchaseId) {
   if (!purchase) return showToast("Não foi possível concluir a operação.");
   try {
     await deletePurchaseCascade(purchaseId);
+    db.cardPurchases[session] = (db.cardPurchases[session] || []).filter(item => item.id !== purchaseId);
+    db.transactions[session] = (db.transactions[session] || []).filter(item => item.sourcePurchaseId !== purchaseId);
+    cacheDatabase();
     await refreshUserFinancialData();
   } catch (error) {
     return showDeleteError(error);
@@ -3409,7 +3547,15 @@ async function initializeApp() {
       clearSession();
     }
   } catch (error) {
-    lastSyncError = error.message;
+    const cached = loadCachedDatabase();
+    if (session && isNetworkError(error) && cached) {
+      db = cached;
+      isOfflineMode = true;
+      lastSyncError = "";
+      showToast("Você está offline. As alterações serão sincronizadas quando a internet voltar.");
+    } else {
+      lastSyncError = error.message;
+    }
   } finally {
     isBooting = false;
     render();
@@ -3438,6 +3584,16 @@ if ("serviceWorker" in navigator) {
 }
 
 window.addEventListener("load", () => autoCheckAppUpdates());
+window.addEventListener("online", async () => {
+  isOfflineMode = false;
+  await syncOfflineQueue();
+  autoCheckAppUpdates();
+});
+window.addEventListener("offline", () => {
+  isOfflineMode = true;
+  render();
+  showToast("Você está offline. As alterações serão sincronizadas quando a internet voltar.");
+});
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) autoCheckAppUpdates();
 });

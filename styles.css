@@ -189,6 +189,7 @@ button { cursor: pointer; }
 .dashboard-detail { margin-bottom: 18px; }
 .dashboard-detail-page { display: grid; gap: 12px; }
 .expiry-notice { margin-bottom: 12px; padding: 10px 12px; border-radius: 13px; color: #94600f; background: #fff0d7; font-size: 11px; font-weight: 800; }
+.offline-banner { margin: 0 18px 14px; padding: 10px 12px; border-radius: 14px; color: #80510b; background: #fff4dc; font-size: 11px; font-weight: 800; line-height: 1.35; box-shadow: 0 8px 20px rgba(128, 81, 11, .08); }
 .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-bottom: 16px; }
 .metric-tile { min-height: 118px; padding: 16px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; border-radius: 19px; color: var(--ink); background: white; border: 1px solid transparent; text-align: left; box-shadow: 0 5px 18px rgba(20,46,38,.04); }
 .metric-tile span { max-width: 120px; color: var(--muted); font-size: 11px; line-height: 1.35; }
