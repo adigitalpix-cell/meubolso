@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.19";
+const APP_VERSION = "1.0.20";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -8,6 +8,7 @@ const DEFAULT_CATEGORIES = ["Alimentação", "Moradia", "Transporte", "Saúde", 
 const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "Poupança", "Carteira", "Mercado Pago"];
 const SUPPORT_STATUSES = { pending: "Pendente", progress: "Em Atendimento", resolved: "Resolvido" };
 let deferredInstallPrompt = null;
+let serviceWorkerReloading = false;
 
 const seed = {
   users: [
@@ -1737,7 +1738,7 @@ function profileTemplate() {
         <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
       <div class="app-version-actions">
-        <button type="button" data-check-updates>Atualizar App</button>
+        ${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}
         <button type="button" class="install-app-button ${canShowInstallButton() ? "" : "hidden"}" data-install-app>Instalar App</button>
       </div>
     </article>
@@ -2312,6 +2313,19 @@ async function checkAppUpdates() {
   }
 }
 
+async function autoCheckAppUpdates() {
+  try {
+    await updateServiceWorker();
+    if (session) {
+      if (isMaster()) await refreshMasterData();
+      else await refreshUserFinancialData();
+      render();
+    }
+  } catch (error) {
+    console.warn("[Minhas Finanças][PWA] atualização automática não concluída", error);
+  }
+}
+
 async function clearAppCache() {
   if (!await confirmCacheClear()) return;
   try {
@@ -2773,7 +2787,12 @@ async function toggleUserBlock(userId) {
   if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
   if (!await confirmAction()) return;
   user.blocked = !user.blocked;
-  saveDatabase();
+  try {
+    await saveDatabase();
+    await refreshMasterData();
+  } catch (error) {
+    return showToast("Não foi possível salvar no Supabase.");
+  }
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -2789,7 +2808,12 @@ async function renewUser(userId) {
   user.blocked = false;
   db.renewals ||= [];
   db.renewals.push({ id: crypto.randomUUID(), userId: user.id, date: dateOffset(), amount: Number(user.renewalPrice || 0), accessExpiresAt: newDate });
-  saveDatabase();
+  try {
+    await saveDatabase();
+    await refreshMasterData();
+  } catch (error) {
+    return showToast("Não foi possível salvar no Supabase.");
+  }
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -3403,6 +3427,19 @@ window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
   showToast("Aplicativo instalado com sucesso.");
   render();
+});
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (serviceWorkerReloading) return;
+    serviceWorkerReloading = true;
+    window.location.reload();
+  });
+}
+
+window.addEventListener("load", () => autoCheckAppUpdates());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) autoCheckAppUpdates();
 });
 
 initializeApp();
