@@ -989,8 +989,8 @@ function render() {
     app.innerHTML = `
       <section class="login-page">
         <form class="login-card">
-          <h2>Sincronizando dados</h2>
-          <p>Conectando ao Supabase...</p>
+          <h2>Sincronizando informações</h2>
+          <p>Atualizando seus dados com segurança...</p>
         </form>
       </section>`;
     return;
