@@ -2,12 +2,12 @@ const SESSION_KEY = "minhas-financas-session";
 const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.22";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.23";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
-const DEFAULT_CATEGORIES = ["Alimentação", "Moradia", "Transporte", "Saúde", "Educação", "Lazer", "Salário", "Outros"];
-const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "Poupança", "Carteira", "Mercado Pago"];
+const DEFAULT_CATEGORIES = ["AlimentaÃ§Ã£o", "Moradia", "Transporte", "SaÃºde", "EducaÃ§Ã£o", "Lazer", "SalÃ¡rio", "Outros"];
+const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "PoupanÃ§a", "Carteira", "Mercado Pago"];
 const SUPPORT_STATUSES = { pending: "Pendente", progress: "Em Atendimento", resolved: "Resolvido" };
 let deferredInstallPrompt = null;
 let serviceWorkerReloading = false;
@@ -21,21 +21,21 @@ const seed = {
   ],
   transactions: {
     "user-demo": [
-      { id: crypto.randomUUID(), name: "Salário", amount: 5200, type: "income", repeat: "fixed", dueDate: dateOffset(-8), status: "paid", category: "Salário", account: "Conta corrente" },
+      { id: crypto.randomUUID(), name: "SalÃ¡rio", amount: 5200, type: "income", repeat: "fixed", dueDate: dateOffset(-8), status: "paid", category: "SalÃ¡rio", account: "Conta corrente" },
       { id: crypto.randomUUID(), name: "Aluguel", amount: 1450, type: "expense", repeat: "fixed", dueDate: dateOffset(-4), status: "paid", category: "Moradia", account: "Conta corrente" },
-      { id: crypto.randomUUID(), name: "Supermercado", amount: 386.72, type: "card", repeat: "none", dueDate: dateOffset(9), status: "pending", category: "Alimentação", account: "Cartão principal" },
-      { id: crypto.randomUUID(), name: "Academia", amount: 119.9, type: "card", repeat: "fixed", dueDate: dateOffset(9), status: "pending", category: "Saúde", account: "Cartão principal" }
+      { id: crypto.randomUUID(), name: "Supermercado", amount: 386.72, type: "card", repeat: "none", dueDate: dateOffset(9), status: "pending", category: "AlimentaÃ§Ã£o", account: "CartÃ£o principal" },
+      { id: crypto.randomUUID(), name: "Academia", amount: 119.9, type: "card", repeat: "fixed", dueDate: dateOffset(9), status: "pending", category: "SaÃºde", account: "CartÃ£o principal" }
     ]
   },
   cards: {
     "user-demo": [
-      { id: "card-demo", name: "Cartão principal", brand: "Visa", limit: 5000, closingDay: 20, dueDay: 10 }
+      { id: "card-demo", name: "CartÃ£o principal", brand: "Visa", limit: 5000, closingDay: 20, dueDay: 10 }
     ]
   },
   cardPurchases: {
     "user-demo": [
-      { id: crypto.randomUUID(), cardId: "card-demo", name: "Supermercado", amount: 386.72, installments: 1, purchaseDate: dateOffset(-5), category: "Alimentação" },
-      { id: crypto.randomUUID(), cardId: "card-demo", name: "Academia", amount: 119.9, installments: 1, purchaseDate: dateOffset(-3), category: "Saúde" }
+      { id: crypto.randomUUID(), cardId: "card-demo", name: "Supermercado", amount: 386.72, installments: 1, purchaseDate: dateOffset(-5), category: "AlimentaÃ§Ã£o" },
+      { id: crypto.randomUUID(), cardId: "card-demo", name: "Academia", amount: 119.9, installments: 1, purchaseDate: dateOffset(-3), category: "SaÃºde" }
     ]
   },
   categories: {
@@ -168,7 +168,7 @@ function cacheDatabase() {
   try {
     localStorage.setItem(LOCAL_DB_KEY, JSON.stringify({ db, cachedAt: new Date().toISOString() }));
   } catch (error) {
-    console.warn("[Minhas Finanças][Offline] não foi possível salvar cache local", error);
+    console.warn("[Minhas FinanÃ§as][Offline] nÃ£o foi possÃ­vel salvar cache local", error);
   }
 }
 
@@ -212,7 +212,7 @@ function isNetworkError(error) {
 }
 
 async function loadDatabase() {
-  if (!SUPABASE_READY) throw new Error("Supabase não configurado.");
+  if (!SUPABASE_READY) throw new Error("Supabase nÃ£o configurado.");
   const cached = loadCachedDatabase();
   if (!navigator.onLine && cached) {
     isOfflineMode = true;
@@ -245,7 +245,7 @@ async function loadScopedDatabase(loggedUser) {
     supabaseSelect("tipos_conta", selectWithFilter(userFilter))
   ]);
   const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
-  if (isLoggedMaster) console.log("[Minhas Finanças][Supabase] SELECT usuarios master", usuarios.length, usuarios);
+  if (isLoggedMaster) console.log("[Minhas FinanÃ§as][Supabase] SELECT usuarios master", usuarios.length, usuarios);
   logSupabaseLoad(loggedUser, loaded);
   isOfflineMode = false;
   db = loaded;
@@ -255,13 +255,13 @@ async function loadScopedDatabase(loggedUser) {
 
 async function refreshMasterData() {
   const user = await loadUserById(session);
-  if (!user || user.role !== "master") throw new Error("Master não encontrado no Supabase.");
+  if (!user || user.role !== "master") throw new Error("Master nÃ£o encontrado no Supabase.");
   db = await loadScopedDatabase(user);
 }
 
 async function refreshCurrentUserData() {
   const user = await loadUserById(session);
-  if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
+  if (!user) throw new Error("UsuÃ¡rio logado nÃ£o encontrado no Supabase.");
   db = await loadScopedDatabase(user);
 }
 
@@ -272,7 +272,7 @@ async function refreshUserFinancialData() {
     return;
   }
   const user = currentUser() || await loadUserById(session);
-  if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
+  if (!user) throw new Error("UsuÃ¡rio logado nÃ£o encontrado no Supabase.");
   const filter = `usuario_id=eq.${session}`;
   const [receitas, despesas, cartoes, compras, parcelas, categorias, tiposConta] = await Promise.all([
     supabaseSelect("receitas", selectWithFilter(filter)),
@@ -283,7 +283,7 @@ async function refreshUserFinancialData() {
     supabaseSelect("categorias", selectWithFilter(filter)),
     supabaseSelect("tipos_conta", selectWithFilter(filter))
   ]);
-  console.log("[Minhas Finanças][Supabase] SELECT despesas usuario_id", session, despesas.length, despesas);
+  console.log("[Minhas FinanÃ§as][Supabase] SELECT despesas usuario_id", session, despesas.length, despesas);
   const loaded = normalizeDatabase(fromSupabaseRows({
     usuarios: [userToSupabaseLike(user)],
     receitas,
@@ -340,22 +340,22 @@ function userToSupabaseLike(user) {
 }
 
 function logSupabaseLoad(user, data) {
-  console.log("[Minhas Finanças][Supabase] usuário logado", user?.username, user?.id);
-  console.log("[Minhas Finanças][Supabase] usuario_id usado", user?.id);
-  console.log("[Minhas Finanças][Supabase] cartões carregados", data.cards?.[user?.id]?.length || 0);
-  console.log("[Minhas Finanças][Supabase] despesas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "expense").length);
-  console.log("[Minhas Finanças][Supabase] receitas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "income").length);
+  console.log("[Minhas FinanÃ§as][Supabase] usuÃ¡rio logado", user?.username, user?.id);
+  console.log("[Minhas FinanÃ§as][Supabase] usuario_id usado", user?.id);
+  console.log("[Minhas FinanÃ§as][Supabase] cartÃµes carregados", data.cards?.[user?.id]?.length || 0);
+  console.log("[Minhas FinanÃ§as][Supabase] despesas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "expense").length);
+  console.log("[Minhas FinanÃ§as][Supabase] receitas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "income").length);
 }
 
 function saveDatabase() {
   return persistDatabase().catch(error => {
     lastSyncError = error.message;
-    showToast("Não foi possível sincronizar com o Supabase.");
+    showToast("NÃ£o foi possÃ­vel sincronizar com o Supabase.");
   });
 }
 
 async function persistDatabase() {
-  if (!SUPABASE_READY) throw new Error("Supabase não configurado.");
+  if (!SUPABASE_READY) throw new Error("Supabase nÃ£o configurado.");
   const payload = toSupabaseRows(db);
   await upsertRows("usuarios", payload.usuarios);
   await Promise.all([
@@ -405,6 +405,11 @@ function supabaseAnd(...filters) {
 
 function showDeleteError(error) {
   console.error("[Minhas Finanças][Supabase] erro ao excluir", error);
+  if (isOfflineMode || hasOfflineQueue() || isNetworkError(error)) {
+    showToast("Exclusão salva offline. Será sincronizada quando a internet voltar.");
+    render();
+    return;
+  }
   showToast("Não foi possível concluir a operação.");
 }
 
@@ -442,7 +447,7 @@ async function supabaseRequest(table, { method = "GET", query = "", body = null,
   }
   if (!response.ok) {
     const message = await response.text();
-    console.error("[Minhas Finanças][Supabase] erro", table, response.status, message);
+    console.error("[Minhas FinanÃ§as][Supabase] erro", table, response.status, message);
     throw new Error(message || `Erro Supabase: ${response.status}`);
   }
   if (response.status === 204) return [];
@@ -482,11 +487,11 @@ async function syncOfflineQueue() {
     }
     showToast("Dados sincronizados com sucesso.");
   } catch (error) {
-    console.error("[Minhas Finanças][Offline] erro ao sincronizar fila", error);
+    console.error("[Minhas FinanÃ§as][Offline] erro ao sincronizar fila", error);
     remaining.push(...queue);
     saveOfflineQueue(remaining);
     isOfflineMode = true;
-    showToast("Não foi possível sincronizar agora. Tentaremos novamente em breve.");
+    showToast("NÃ£o foi possÃ­vel sincronizar agora. Tentaremos novamente em breve.");
   } finally {
     isSyncingOfflineQueue = false;
   }
@@ -565,8 +570,8 @@ function fromSupabaseRows(rows) {
         installmentPayments[key] = {
           paidDate: parcela.data_pagamento || "",
           paidTime: trimTime(parcela.hora_pagamento),
-          paymentMethod: parcela.forma_pagamento || "Cartão",
-          account: parcela.tipo_conta || "Cartão"
+          paymentMethod: parcela.forma_pagamento || "CartÃ£o",
+          account: parcela.tipo_conta || "CartÃ£o"
         };
       }
     });
@@ -1062,8 +1067,8 @@ function cardInstallmentItems(userId = session) {
         dueDate,
         status: paid ? "paid" : "pending",
         category: purchase.category || "Outros",
-        account: card?.name || "Cartão",
-        cardName: card?.name || "Cartão"
+        account: card?.name || "CartÃ£o",
+        cardName: card?.name || "CartÃ£o"
       };
     });
   });
@@ -1103,8 +1108,8 @@ function initials(name) {
 }
 
 function iconFor(category, type) {
-  if (type === "income") return "↓";
-  return ({ "Alimentação": "◒", "Moradia": "⌂", "Transporte": "↗", "Saúde": "+", "Lazer": "☆" })[category] || "↑";
+  if (type === "income") return "â†“";
+  return ({ "AlimentaÃ§Ã£o": "â—’", "Moradia": "âŒ‚", "Transporte": "â†—", "SaÃºde": "+", "Lazer": "â˜†" })[category] || "â†‘";
 }
 
 function render() {
@@ -1113,8 +1118,8 @@ function render() {
     app.innerHTML = `
       <section class="login-page">
         <form class="login-card">
-          <h2>Sincronizando informações</h2>
-          <p>Atualizando seus dados com segurança...</p>
+          <h2>Sincronizando informaÃ§Ãµes</h2>
+          <p>Atualizando seus dados com seguranÃ§a...</p>
         </form>
       </section>`;
     return;
@@ -1123,8 +1128,8 @@ function render() {
     app.innerHTML = `
       <section class="login-page">
         <form class="login-card">
-          <h2>Não foi possível conectar</h2>
-          <div class="login-alert">Verifique sua conexão e tente novamente.</div>
+          <h2>NÃ£o foi possÃ­vel conectar</h2>
+          <div class="login-alert">Verifique sua conexÃ£o e tente novamente.</div>
           <button class="primary-button" type="button" data-retry-sync>Tentar novamente</button>
         </form>
       </section>`;
@@ -1167,13 +1172,13 @@ function loginTemplate(message = "") {
         <div class="login-copy">
           <span class="eyebrow">Sua vida financeira organizada</span>
           <h1>Dinheiro claro.<br>Vida mais leve.</h1>
-          <p>Receitas, despesas e cartão em um só lugar.</p>
+          <p>Receitas, despesas e cartÃ£o em um sÃ³ lugar.</p>
         </div>
       </div>
       <form class="login-card" id="login-form">
         <h2>Entre na sua conta</h2>
         ${message ? `<div class="login-alert">${escapeHtml(message)}</div>` : ""}
-        <label class="field"><span>Usuário</span><input name="username" autocomplete="username" required placeholder="Digite seu usuário"></label>
+        <label class="field"><span>UsuÃ¡rio</span><input name="username" autocomplete="username" required placeholder="Digite seu usuÃ¡rio"></label>
         <label class="field"><span>Senha</span><input name="password" type="password" autocomplete="current-password" required placeholder="Digite sua senha"></label>
         <button class="primary-button" type="submit">Entrar</button>
         <button class="auth-link" type="button" data-auth-view="register">Cadastrar</button>
@@ -1192,12 +1197,12 @@ function registerTemplate() {
       <form class="login-card" id="register-form">
         <h2>Cadastrar</h2>
         <label class="field"><span>Nome</span><input name="name" required maxlength="80" placeholder="Seu nome"></label>
-        <label class="field"><span>Usuário</span><input name="username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" placeholder="Ex.: cliente01"></label>
-        <label class="field"><span>Senha</span><input name="password" type="password" minlength="6" required placeholder="Mínimo de 6 caracteres"></label>
+        <label class="field"><span>UsuÃ¡rio</span><input name="username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" placeholder="Ex.: cliente01"></label>
+        <label class="field"><span>Senha</span><input name="password" type="password" minlength="6" required placeholder="MÃ­nimo de 6 caracteres"></label>
         <label class="field"><span>WhatsApp</span><input name="whatsapp" required inputmode="tel" placeholder="(00) 00000-0000"></label>
         <label class="field"><span>E-mail</span><input name="email" type="email" required placeholder="voce@email.com"></label>
         <button class="primary-button" type="submit">Criar conta</button>
-        <button class="auth-link" type="button" data-auth-view="login">Já tenho conta</button>
+        <button class="auth-link" type="button" data-auth-view="login">JÃ¡ tenho conta</button>
       </form>
     </section>`;
 }
@@ -1210,15 +1215,15 @@ function shellTemplate() {
         <div><span class="eyebrow">${greeting()}</span><h1 class="hello">${escapeHtml(user.name.split(" ")[0])}</h1></div>
         <button class="avatar" data-view="profile">${initials(user.name)}</button>
       </header>
-      ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
+      ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">VocÃª estÃ¡ offline. As alteraÃ§Ãµes serÃ£o sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
-      ${user.role === "user" ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
+      ${user.role === "user" ? `<button class="fab" data-add aria-label="Adicionar movimentaÃ§Ã£o">+</button>` : ""}
       <nav class="bottom-nav">
-        ${navButton("home", "⌂", "Início")}
-        ${user.role === "master" ? navButton("users", "♙", "Usuários") : navButton("transactions", "↕", "Transações")}
-        ${user.role === "master" ? navButton("reports", "▤", "Relatórios") : navButton("card", "▰", "Cartões")}
+        ${navButton("home", "âŒ‚", "InÃ­cio")}
+        ${user.role === "master" ? navButton("users", "â™™", "UsuÃ¡rios") : navButton("transactions", "â†•", "TransaÃ§Ãµes")}
+        ${user.role === "master" ? navButton("reports", "â–¤", "RelatÃ³rios") : navButton("card", "â–°", "CartÃµes")}
         ${user.role === "master" ? navButton("support", "?", "Suporte") : ""}
-        ${navButton("profile", "○", "Perfil")}
+        ${navButton("profile", "â—‹", "Perfil")}
       </nav>
     </section>`;
 }
@@ -1276,15 +1281,15 @@ function homeTemplate() {
   if (isMaster()) {
     const metrics = masterMetrics();
     return `
-      <div class="page-title"><span class="eyebrow">Painel master</span><h1>Controle de acessos</h1><p>Selecione um cartão para gerenciar os usuários.</p></div>
+      <div class="page-title"><span class="eyebrow">Painel master</span><h1>Controle de acessos</h1><p>Selecione um cartÃ£o para gerenciar os usuÃ¡rios.</p></div>
       <div class="metric-grid">
-        ${metricTile("Total de usuários", metrics.total, "neutral", "all")}
-        ${metricTile("Usuários ativos", metrics.active, "active", "active")}
+        ${metricTile("Total de usuÃ¡rios", metrics.total, "neutral", "all")}
+        ${metricTile("UsuÃ¡rios ativos", metrics.active, "active", "active")}
         ${metricTile("Vencendo em 7 dias", metrics.expiring, "warning", "expiring")}
-        ${metricTile("Usuários vencidos", metrics.expired, "expired", "expired")}
+        ${metricTile("UsuÃ¡rios vencidos", metrics.expired, "expired", "expired")}
       </div>
       <div class="master-actions"><button class="primary-button" data-view="masterDashboard">Ver Dashboard Master</button></div>
-      <div class="dashboard-note"><b>Administração centralizada</b><span>Os números são atualizados automaticamente conforme os acessos são alterados.</span></div>`;
+      <div class="dashboard-note"><b>AdministraÃ§Ã£o centralizada</b><span>Os nÃºmeros sÃ£o atualizados automaticamente conforme os acessos sÃ£o alterados.</span></div>`;
   }
   const dashboard = financialDashboard();
   return `
@@ -1293,21 +1298,21 @@ function homeTemplate() {
       <small>Saldo atual</small>
       <h2>${money(dashboard.balance)}</h2>
       <div class="balance-meta">
-        <div><span>Receitas do mês</span><strong class="positive">+ ${money(dashboard.monthIncome)}</strong></div>
-        <div><span>Despesas do mês</span><strong class="negative">- ${money(dashboard.monthExpense)}</strong></div>
+        <div><span>Receitas do mÃªs</span><strong class="positive">+ ${money(dashboard.monthIncome)}</strong></div>
+        <div><span>Despesas do mÃªs</span><strong class="negative">- ${money(dashboard.monthExpense)}</strong></div>
       </div>
     </article>
     <div class="dashboard-grid">
       ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
-      ${dashboardShortcut("cards", "Limite disponível", money(dashboard.availableLimit))}
+      ${dashboardShortcut("cards", "Limite disponÃ­vel", money(dashboard.availableLimit))}
       ${dashboardShortcut("today", "Vence hoje", dashboard.dueToday)}
-      ${dashboardShortcut("soon", "Próximos 7 dias", dashboard.dueSoon)}
+      ${dashboardShortcut("soon", "PrÃ³ximos 7 dias", dashboard.dueSoon)}
       ${dashboardShortcut("overdue", "Em atraso", dashboard.overdue, "danger-card")}
       ${dashboardShortcut("overdueValue", "Valor em atraso", money(dashboard.overdueAmount), "danger-card")}
-      ${dashboardShortcut("received", "Recebido no mês", money(dashboard.receivedMonth))}
-      ${dashboardShortcut("toReceive", "A receber no mês", money(dashboard.toReceiveMonth))}
-      ${dashboardShortcut("paid", "Pago no mês", money(dashboard.paidMonth))}
-      ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
+      ${dashboardShortcut("received", "Recebido no mÃªs", money(dashboard.receivedMonth))}
+      ${dashboardShortcut("toReceive", "A receber no mÃªs", money(dashboard.toReceiveMonth))}
+      ${dashboardShortcut("paid", "Pago no mÃªs", money(dashboard.paidMonth))}
+      ${dashboardShortcut("toPay", "A pagar no mÃªs", money(dashboard.toPayMonth))}
     </div>
     <div class="master-actions"><button class="primary-button" data-view="graphDashboard">Dashboard</button></div>`;
 }
@@ -1319,9 +1324,9 @@ function dashboardShortcut(detail, label, value, className = "") {
 function dashboardDetailTemplate(type) {
   const title = ({
     invoice: "Fatura detalhada",
-    cards: "Resumo dos cartões",
+    cards: "Resumo dos cartÃµes",
     today: "Contas vencendo hoje",
-    soon: "Contas dos próximos 7 dias",
+    soon: "Contas dos prÃ³ximos 7 dias",
     overdue: "Contas atrasadas",
     overdueValue: "Valor em atraso",
     received: "Receitas recebidas",
@@ -1332,7 +1337,7 @@ function dashboardDetailTemplate(type) {
   return `
     <section class="dashboard-detail-page">
       <div class="page-title"><span class="eyebrow">Detalhe financeiro</span><h1>${title}</h1></div>
-      <button class="secondary-button back-button" data-view="home">Voltar ao início</button>
+      <button class="secondary-button back-button" data-view="home">Voltar ao inÃ­cio</button>
       <div class="transaction-list">${dashboardDetailRows(type)}</div>
     </section>`;
 }
@@ -1343,11 +1348,11 @@ function expiryNotice() {
   const days = daysUntilExpiry(user);
   const messages = {
     2: "Seu acesso vence em 2 dias.",
-    1: "Seu acesso vence amanhã.",
+    1: "Seu acesso vence amanhÃ£.",
     0: "Seu acesso vence hoje."
   };
   return Object.prototype.hasOwnProperty.call(messages, days)
-    ? `<div class="expiry-notice">⚠️ ${messages[days]}</div>`
+    ? `<div class="expiry-notice">âš ï¸ ${messages[days]}</div>`
     : "";
 }
 
@@ -1427,7 +1432,7 @@ function upcomingDueRows(items) {
     .map(item => {
       const days = daysBetween(dateOffset(), item.dueDate);
       const label = days === 0 ? "Hoje" : `Em ${days} dia${days === 1 ? "" : "s"}`;
-      return `<article class="due-row"><div><strong>${escapeHtml(item.name)}</strong><span>${label} · ${formatDate(item.dueDate, true)}</span></div><b>${money(item.amount)}</b><small>${statusLabel(item)}</small></article>`;
+      return `<article class="due-row"><div><strong>${escapeHtml(item.name)}</strong><span>${label} Â· ${formatDate(item.dueDate, true)}</span></div><b>${money(item.amount)}</b><small>${statusLabel(item)}</small></article>`;
     });
   return rows.join("") || `<div class="empty">Nenhum vencimento pendente.</div>`;
 }
@@ -1441,9 +1446,9 @@ function cardSummaryRows() {
     const invoice = currentInvoice(card.id);
     const dueDate = nextCardDueDate(card);
     const days = daysBetween(dateOffset(), dueDate);
-    return `<article class="mini-card"><div><strong>${escapeHtml(card.name)}</strong><span>Fatura: ${money(invoice)} · Vence em ${days <= 0 ? "hoje" : `${days} dia${days === 1 ? "" : "s"}`}</span></div><small>Limite disponível: ${money(availableCardLimit(card.id))}</small></article>`;
+    return `<article class="mini-card"><div><strong>${escapeHtml(card.name)}</strong><span>Fatura: ${money(invoice)} Â· Vence em ${days <= 0 ? "hoje" : `${days} dia${days === 1 ? "" : "s"}`}</span></div><small>Limite disponÃ­vel: ${money(availableCardLimit(card.id))}</small></article>`;
   });
-  return rows.join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`;
+  return rows.join("") || `<div class="empty">Nenhum cartÃ£o cadastrado.</div>`;
 }
 
 function nextCardDueDate(card) {
@@ -1456,39 +1461,39 @@ function nextCardDueDate(card) {
 function financialDashboardTemplate() {
   const dashboard = financialDashboard();
   return `
-    <div class="page-title"><span class="eyebrow">Dashboard</span><h1>Visão financeira</h1><p>Resumo completo separado da tela inicial.</p></div>
-    <button class="secondary-button back-button" data-view="home">Voltar ao início</button>
+    <div class="page-title"><span class="eyebrow">Dashboard</span><h1>VisÃ£o financeira</h1><p>Resumo completo separado da tela inicial.</p></div>
+    <button class="secondary-button back-button" data-view="home">Voltar ao inÃ­cio</button>
     <div class="dashboard-grid compact">
       ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
-      ${dashboardShortcut("cards", "Limite disponível", money(dashboard.availableLimit))}
+      ${dashboardShortcut("cards", "Limite disponÃ­vel", money(dashboard.availableLimit))}
       ${dashboardShortcut("today", "Vence hoje", dashboard.dueToday)}
-      ${dashboardShortcut("soon", "Próximos 7 dias", dashboard.dueSoon)}
+      ${dashboardShortcut("soon", "PrÃ³ximos 7 dias", dashboard.dueSoon)}
       ${dashboardShortcut("overdue", "Em atraso", dashboard.overdue, "danger-card")}
       ${dashboardShortcut("overdueValue", "Valor em atraso", money(dashboard.overdueAmount), "danger-card")}
-      ${dashboardShortcut("received", "Recebido no mês", money(dashboard.receivedMonth))}
-      ${dashboardShortcut("toReceive", "A receber no mês", money(dashboard.toReceiveMonth))}
-      ${dashboardShortcut("paid", "Pago no mês", money(dashboard.paidMonth))}
-      ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
+      ${dashboardShortcut("received", "Recebido no mÃªs", money(dashboard.receivedMonth))}
+      ${dashboardShortcut("toReceive", "A receber no mÃªs", money(dashboard.toReceiveMonth))}
+      ${dashboardShortcut("paid", "Pago no mÃªs", money(dashboard.paidMonth))}
+      ${dashboardShortcut("toPay", "A pagar no mÃªs", money(dashboard.toPayMonth))}
     </div>
-    <div class="master-actions"><button class="primary-button" data-view="graphDashboard">Dashboard de gráficos</button></div>
-    <div class="section-header"><h2>Resumo dos cartões</h2><button class="text-button" data-view="card">Ver cartões</button></div>
+    <div class="master-actions"><button class="primary-button" data-view="graphDashboard">Dashboard de grÃ¡ficos</button></div>
+    <div class="section-header"><h2>Resumo dos cartÃµes</h2><button class="text-button" data-view="card">Ver cartÃµes</button></div>
     <div class="card-list">${dashboard.cardSummaries}</div>
-    <div class="section-header"><h2>Próximos vencimentos</h2></div>
+    <div class="section-header"><h2>PrÃ³ximos vencimentos</h2></div>
     <div class="due-list">${dashboard.upcomingRows}</div>
     <div class="section-header"><h2>Contas atrasadas</h2></div>
     <div class="transaction-list">${dashboardDetailRows("overdue")}</div>
-    <div class="section-header"><h2>Movimentações recentes</h2><button class="text-button" data-view="transactions">Ver todas</button></div>
+    <div class="section-header"><h2>MovimentaÃ§Ãµes recentes</h2><button class="text-button" data-view="transactions">Ver todas</button></div>
     <div class="transaction-list">${transactionRows(dashboardTransactions().slice(0, 5))}</div>`;
 }
 
 function graphDashboardTemplate() {
   if (isMaster()) {
     return `
-      <div class="page-title"><span class="eyebrow">Dashboard de gráficos</span><h1>Indicadores Master</h1><p>Gráficos administrativos, sem dados financeiros particulares.</p></div>
+      <div class="page-title"><span class="eyebrow">Dashboard de grÃ¡ficos</span><h1>Indicadores Master</h1><p>GrÃ¡ficos administrativos, sem dados financeiros particulares.</p></div>
       <button class="secondary-button back-button" data-view="masterDashboard">Voltar ao Dashboard Master</button>
-      ${chartBlock("Crescimento de usuários", barRows(userGrowthRows(), "number"))}
-      ${chartBlock("Status dos usuários", barRows(masterStatusRows(), "number"))}
-      ${chartBlock("Novos usuários e renovações", barRows(masterMovementRows(), "number"))}`;
+      ${chartBlock("Crescimento de usuÃ¡rios", barRows(userGrowthRows(), "number"))}
+      ${chartBlock("Status dos usuÃ¡rios", barRows(masterStatusRows(), "number"))}
+      ${chartBlock("Novos usuÃ¡rios e renovaÃ§Ãµes", barRows(masterMovementRows(), "number"))}`;
   }
   const dashboard = financialDashboard();
   const items = dashboardTransactions();
@@ -1499,20 +1504,20 @@ function graphDashboardTemplate() {
   const paidBills = monthItems.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
   const pendingBills = monthItems.filter(item => item.type !== "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
   return `
-    <div class="page-title"><span class="eyebrow">Dashboard de gráficos</span><h1>Análise visual</h1><p>Receitas, despesas, fluxo de caixa e cartões.</p></div>
+    <div class="page-title"><span class="eyebrow">Dashboard de grÃ¡ficos</span><h1>AnÃ¡lise visual</h1><p>Receitas, despesas, fluxo de caixa e cartÃµes.</p></div>
     <button class="secondary-button back-button" data-view="financialDashboard">Voltar ao Dashboard</button>
     <div class="insight-grid">
       ${insightCard("Receitas x Despesas", `${money(income)} / ${money(expenses)}`, income >= expenses ? "positive" : "negative")}
       ${insightCard("Limite utilizado", money(pendingPurchaseTotal()), "warning")}
-      ${insightCard("Faturas dos cartões", money(currentInvoice()), "warning")}
+      ${insightCard("Faturas dos cartÃµes", money(currentInvoice()), "warning")}
       ${insightCard("Saldo atual", money(dashboard.balance), dashboard.balance >= 0 ? "positive" : "negative")}
     </div>
     ${chartBlock("Receitas x Despesas", barRows([{ label: "Receitas", value: income }, { label: "Despesas", value: expenses }]))}
     ${chartBlock("Fluxo de caixa", barRows(balanceTrend()))}
-    ${chartBlock("Cartões", barRows(userCards().map(card => ({ label: card.name, value: pendingPurchaseTotal(card.id) }))))}
+    ${chartBlock("CartÃµes", barRows(userCards().map(card => ({ label: card.name, value: pendingPurchaseTotal(card.id) }))))}
     ${chartBlock("Contas atrasadas", barRows(categoryTotals(dashboardTransactions().filter(item => item.status === "pending" && item.type !== "income" && item.dueDate < dateOffset()))))}
     ${chartBlock("Gastos por categoria", barRows(categoryTotals(monthItems.filter(item => item.type !== "income"))))}
-    ${chartBlock("Evolução mensal", barRows(balanceTrend()))}
+    ${chartBlock("EvoluÃ§Ã£o mensal", barRows(balanceTrend()))}
     ${chartBlock("Contas pagas x pendentes", barRows([{ label: "Pagas", value: paidBills }, { label: "Pendentes", value: pendingBills }]))}
     ${chartBlock("Recebido x A receber", barRows([{ label: "Recebido", value: dashboard.receivedMonth }, { label: "A receber", value: dashboard.toReceiveMonth }]))}
     ${chartBlock("Pago x A pagar", barRows([{ label: "Pago", value: dashboard.paidMonth }, { label: "A pagar", value: dashboard.toPayMonth }]))}`;
@@ -1525,22 +1530,22 @@ function masterDashboardTemplate() {
   const expired = users.filter(isExpired).length;
   const blocked = users.filter(user => user.blocked).length;
   return `
-    <div class="page-title"><span class="eyebrow">Dashboard master</span><h1>Indicadores administrativos</h1><p>Sem dados financeiros particulares dos usuários.</p></div>
+    <div class="page-title"><span class="eyebrow">Dashboard master</span><h1>Indicadores administrativos</h1><p>Sem dados financeiros particulares dos usuÃ¡rios.</p></div>
     <button class="secondary-button back-button" data-view="home">Voltar ao painel</button>
     <div class="insight-grid">
-      ${insightCard("Total de usuários", metrics.total, "neutral")}
-      ${insightCard("Usuários ativos", metrics.active, "positive")}
-      ${insightCard("Usuários vencidos", metrics.expired, "negative")}
+      ${insightCard("Total de usuÃ¡rios", metrics.total, "neutral")}
+      ${insightCard("UsuÃ¡rios ativos", metrics.active, "positive")}
+      ${insightCard("UsuÃ¡rios vencidos", metrics.expired, "negative")}
       ${insightCard("Vencendo em 7 dias", metrics.expiring, "warning")}
-      ${insightCard("Novos usuários do mês", metrics.newUsersMonth, "neutral")}
-      ${insightCard("Renovações do mês", metrics.renewalsMonth, "positive")}
+      ${insightCard("Novos usuÃ¡rios do mÃªs", metrics.newUsersMonth, "neutral")}
+      ${insightCard("RenovaÃ§Ãµes do mÃªs", metrics.renewalsMonth, "positive")}
       ${insightCard("Receita prevista", money(metrics.forecast), "positive")}
-      ${insightCard("Usuários bloqueados", metrics.blocked, "negative")}
+      ${insightCard("UsuÃ¡rios bloqueados", metrics.blocked, "negative")}
     </div>
-    <div class="master-actions"><button class="primary-button" data-view="graphDashboard">Dashboard de gráficos</button></div>
-    ${chartBlock("Crescimento de usuários", barRows(userGrowthRows(), "number"))}
-    ${chartBlock("Status dos usuários", barRows(masterStatusRows(), "number"))}
-    <div class="dashboard-note"><b>Privacidade preservada</b><span>Este dashboard mostra apenas métricas administrativas de acesso.</span></div>`;
+    <div class="master-actions"><button class="primary-button" data-view="graphDashboard">Dashboard de grÃ¡ficos</button></div>
+    ${chartBlock("Crescimento de usuÃ¡rios", barRows(userGrowthRows(), "number"))}
+    ${chartBlock("Status dos usuÃ¡rios", barRows(masterStatusRows(), "number"))}
+    <div class="dashboard-note"><b>Privacidade preservada</b><span>Este dashboard mostra apenas mÃ©tricas administrativas de acesso.</span></div>`;
 }
 
 function insightCard(label, value, tone = "neutral") {
@@ -1595,8 +1600,8 @@ function masterStatusRows() {
 function masterMovementRows() {
   const metrics = masterMetrics();
   return [
-    { label: "Novos usuários", value: metrics.newUsersMonth },
-    { label: "Renovações", value: metrics.renewalsMonth }
+    { label: "Novos usuÃ¡rios", value: metrics.newUsersMonth },
+    { label: "RenovaÃ§Ãµes", value: metrics.renewalsMonth }
   ];
 }
 
@@ -1611,11 +1616,11 @@ function barRows(rows, format = "money") {
 }
 
 function metricTile(label, value, tone, scope) {
-  return `<button class="metric-tile ${tone}" data-user-scope="${scope}"><span>${label}</span><strong>${value}</strong><small>Ver usuários →</small></button>`;
+  return `<button class="metric-tile ${tone}" data-user-scope="${scope}"><span>${label}</span><strong>${value}</strong><small>Ver usuÃ¡rios â†’</small></button>`;
 }
 
 function transactionRows(items, showOwner = false, allowActions = false) {
-  if (!items.length) return `<div class="empty">Nenhuma movimentação encontrada.</div>`;
+  if (!items.length) return `<div class="empty">Nenhuma movimentaÃ§Ã£o encontrada.</div>`;
   return items.map(item => `
     <article class="transaction ${item.type}">
       <div class="transaction-icon">${iconFor(item.category, item.type)}</div>
@@ -1634,7 +1639,7 @@ function paymentMeta(item) {
   if (item.account) details.push(item.account);
   if (item.paidDate) details.push(`Pago em ${formatDate(item.paidDate, true)}`);
   if (item.paidTime) details.push(item.paidTime);
-  return details.length ? `<small class="payment-meta">${details.map(escapeHtml).join(" · ")}</small>` : "";
+  return details.length ? `<small class="payment-meta">${details.map(escapeHtml).join(" Â· ")}</small>` : "";
 }
 
 function transactionActionButtons(item) {
@@ -1654,28 +1659,28 @@ function transactionActionButtons(item) {
 }
 
 function transactionDescription(item, showOwner = false) {
-  const owner = showOwner ? `${escapeHtml(item.ownerName || "")} · ` : "";
+  const owner = showOwner ? `${escapeHtml(item.ownerName || "")} Â· ` : "";
   if (item.source === "card-installment-virtual") {
-    return `${owner}Compra no cartão - ${escapeHtml(item.cardName || item.account || "Cartão")} · Categoria: ${escapeHtml(item.category)} · ${formatDate(item.dueDate)}`;
+    return `${owner}Compra no cartÃ£o - ${escapeHtml(item.cardName || item.account || "CartÃ£o")} Â· Categoria: ${escapeHtml(item.category)} Â· ${formatDate(item.dueDate)}`;
   }
   if (item.source === "card-installment") {
     const purchase = userCardPurchases(item.ownerId || session).find(p => p.id === item.sourcePurchaseId);
     const card = userCards(item.ownerId || session).find(c => c.id === purchase?.cardId);
-    return `${owner}Compra no cartão${card ? ` - ${escapeHtml(card.name)}` : ""} · Categoria: ${escapeHtml(item.category)} · ${formatDate(item.dueDate)}`;
+    return `${owner}Compra no cartÃ£o${card ? ` - ${escapeHtml(card.name)}` : ""} Â· Categoria: ${escapeHtml(item.category)} Â· ${formatDate(item.dueDate)}`;
   }
-  return `${owner}${escapeHtml(item.category)} · ${formatDate(item.dueDate)}${item.repeat === "fixed" ? " · Mensal" : ""}`;
+  return `${owner}${escapeHtml(item.category)} Â· ${formatDate(item.dueDate)}${item.repeat === "fixed" ? " Â· Mensal" : ""}`;
 }
 
 function statusLabel(item) {
   if (item.type === "income") return isPaidStatus(item) ? "Recebido" : "A receber";
-  return isPaidStatus(item) ? "Pago" : "Não pago";
+  return isPaidStatus(item) ? "Pago" : "NÃ£o pago";
 }
 
 function transactionsTemplate() {
   const total = totals();
   const filtered = userTransactions().filter(item => transactionFilter === "all" || item.type === transactionFilter);
   return `
-    <div class="page-title"><span class="eyebrow">Seu histórico</span><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></div>
+    <div class="page-title"><span class="eyebrow">Seu histÃ³rico</span><h1>TransaÃ§Ãµes</h1><p>Acompanhe tudo que entra e sai.</p></div>
     <div class="summary-grid">
       <div class="summary-tile"><span>A receber</span><strong class="positive">${money(userTransactions().filter(i => i.type === "income" && !isPaidStatus(i)).reduce((a,b) => a + b.amount, 0))}</strong></div>
       <div class="summary-tile"><span>A pagar</span><strong class="negative">${money(total.pending)}</strong></div>
@@ -1696,19 +1701,19 @@ function cardTemplate() {
   const usedLimit = pendingPurchaseTotal();
   const availableLimit = availableCardLimit();
   return `
-    <div class="page-title"><span class="eyebrow">Cartões de crédito</span><h1>Meus Cartões</h1><p>Cadastre cartões e lance compras separadamente.</p></div>
+    <div class="page-title"><span class="eyebrow">CartÃµes de crÃ©dito</span><h1>Meus CartÃµes</h1><p>Cadastre cartÃµes e lance compras separadamente.</p></div>
     <article class="credit-card">
-      <header><small>Limite total dos cartões</small><strong>${cards.length} cartão${cards.length === 1 ? "" : "ões"}</strong></header>
+      <header><small>Limite total dos cartÃµes</small><strong>${cards.length} cartÃ£o${cards.length === 1 ? "" : "Ãµes"}</strong></header>
       <h2>${money(limit)}</h2>
       <div class="card-limit-grid three">
         <span>Total <b>${money(limit)}</b></span>
         <span>Utilizado <b>${money(usedLimit)}</b></span>
-        <span>Disponível <b>${money(availableLimit)}</b></span>
+        <span>DisponÃ­vel <b>${money(availableLimit)}</b></span>
       </div>
       <div class="card-progress"><i style="width:${limit ? Math.min(usedLimit / limit * 100, 100) : 0}%"></i></div>
     </article>
-    <div class="section-header"><h2>Cartões cadastrados</h2><span class="list-count">${cards.length}</span></div>
-    <div class="card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>`;
+    <div class="section-header"><h2>CartÃµes cadastrados</h2><span class="list-count">${cards.length}</span></div>
+    <div class="card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartÃ£o cadastrado.</div>`}</div>`;
 }
 
 function cardPurchasesTemplate() {
@@ -1717,18 +1722,18 @@ function cardPurchasesTemplate() {
   if (selectedCardId && !cards.some(card => card.id === selectedCardId)) selectedCardId = cards[0]?.id || null;
   const selectedCard = cards.find(card => card.id === selectedCardId);
   const purchases = userCardPurchases().filter(purchase => !selectedCardId || purchase.cardId === selectedCardId);
-  if (!selectedCard) return `<div class="page-title"><span class="eyebrow">Compras</span><h1>Nenhum cartão</h1><p>Cadastre um cartão para lançar compras.</p></div><button class="primary-button" data-view="card">Voltar para cartões</button>`;
+  if (!selectedCard) return `<div class="page-title"><span class="eyebrow">Compras</span><h1>Nenhum cartÃ£o</h1><p>Cadastre um cartÃ£o para lanÃ§ar compras.</p></div><button class="primary-button" data-view="card">Voltar para cartÃµes</button>`;
   return `
-    <div class="page-title"><span class="eyebrow">Compras do cartão</span><h1>Compras - ${escapeHtml(selectedCard.name)}</h1><p>Gerencie compras, parcelas e pagamentos deste cartão.</p></div>
+    <div class="page-title"><span class="eyebrow">Compras do cartÃ£o</span><h1>Compras - ${escapeHtml(selectedCard.name)}</h1><p>Gerencie compras, parcelas e pagamentos deste cartÃ£o.</p></div>
     <article class="mini-card selected">
-      <div><strong>${escapeHtml(selectedCard.name)}</strong><span>${escapeHtml(selectedCard.brand)} · Fatura ${money(currentInvoice(selectedCard.id))}</span></div>
-      <small>Limite disponível: ${money(availableCardLimit(selectedCard.id))}</small>
+      <div><strong>${escapeHtml(selectedCard.name)}</strong><span>${escapeHtml(selectedCard.brand)} Â· Fatura ${money(currentInvoice(selectedCard.id))}</span></div>
+      <small>Limite disponÃ­vel: ${money(availableCardLimit(selectedCard.id))}</small>
     </article>
     <div class="card-actions-row single">
       <button class="secondary-button" data-view="card">Voltar</button>
     </div>
     <div class="section-header"><h2>Compras</h2><span class="list-count">${purchases.length}</span></div>
-    <div class="purchase-list">${purchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra cadastrada neste cartão.</div>`}</div>`;
+    <div class="purchase-list">${purchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra cadastrada neste cartÃ£o.</div>`}</div>`;
 }
 
 function purchaseEditorTemplate() {
@@ -1736,18 +1741,18 @@ function purchaseEditorTemplate() {
   const editing = editingPurchaseId ? userCardPurchases().find(purchase => purchase.id === editingPurchaseId) : null;
   const title = editing ? "Editar compra" : "Nova compra";
   return `
-    <div class="page-title"><span class="eyebrow">Compra no cartão</span><h1>${title}</h1><p>Informe os dados da compra e o parcelamento.</p></div>
+    <div class="page-title"><span class="eyebrow">Compra no cartÃ£o</span><h1>${title}</h1><p>Informe os dados da compra e o parcelamento.</p></div>
     ${purchaseFormTemplate(cards)}
     <button class="secondary-button" data-view="cardPurchases">Voltar para compras</button>`;
 }
 
 function installmentsTemplate() {
   const purchase = userCardPurchases().find(item => item.id === selectedPurchaseId);
-  if (!purchase) return `<div class="page-title"><span class="eyebrow">Parcelas</span><h1>Compra não encontrada</h1></div><button class="primary-button" data-view="cardPurchases">Voltar</button>`;
+  if (!purchase) return `<div class="page-title"><span class="eyebrow">Parcelas</span><h1>Compra nÃ£o encontrada</h1></div><button class="primary-button" data-view="cardPurchases">Voltar</button>`;
   const card = userCards().find(item => item.id === purchase.cardId);
   const rows = Array.from({ length: purchase.installments }, (_, index) => installmentRow(purchase, index + 1)).join("");
   return `
-    <div class="page-title"><span class="eyebrow">Histórico de parcelas</span><h1>${escapeHtml(purchase.name)}</h1><p>${escapeHtml(card?.name || "Cartão")} · ${purchase.installments}x de ${money(purchase.amount / purchase.installments)}</p></div>
+    <div class="page-title"><span class="eyebrow">HistÃ³rico de parcelas</span><h1>${escapeHtml(purchase.name)}</h1><p>${escapeHtml(card?.name || "CartÃ£o")} Â· ${purchase.installments}x de ${money(purchase.amount / purchase.installments)}</p></div>
     <div class="purchase-list">${rows}</div>
     <button class="secondary-button" data-view="cardPurchases">Voltar para compras</button>`;
 }
@@ -1757,14 +1762,14 @@ function cardFormTemplate() {
   return `
     <div class="card-modal-fields">
       <input type="hidden" name="id" value="${editing?.id || ""}">
-      <label class="field"><span>Nome do cartão</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Nubank"></label>
+      <label class="field"><span>Nome do cartÃ£o</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Nubank"></label>
       <label class="field"><span>Bandeira</span><select name="brand">${["Visa","Mastercard","Elo","American Express","Outro"].map(brand => `<option ${editing?.brand === brand ? "selected" : ""}>${brand}</option>`).join("")}</select></label>
       <label class="field"><span>Limite</span><div class="money-input"><b>R$</b><input name="limit" required inputmode="decimal" value="${editing ? String(editing.limit).replace(".", ",") : ""}" placeholder="0,00"></div></label>
       <div class="form-grid">
         <label class="field"><span>Fechamento</span><input name="closingDay" required type="number" min="1" max="31" value="${editing?.closingDay || ""}" placeholder="20"></label>
         <label class="field"><span>Vencimento</span><input name="dueDay" required type="number" min="1" max="31" value="${editing?.dueDay || ""}" placeholder="10"></label>
       </div>
-      <button class="primary-button card-save-button" type="submit">Salvar cartão</button>
+      <button class="primary-button card-save-button" type="submit">Salvar cartÃ£o</button>
     </div>`;
 }
 
@@ -1775,12 +1780,12 @@ function purchaseFormTemplate(cards) {
     <form class="admin-form" id="purchase-form">
       <h2>${editing ? "Editar compra" : "Nova compra"}</h2>
       <input type="hidden" name="id" value="${editing?.id || ""}">
-      <label class="field"><span>Cartão</span><select name="cardId">${cards.map(card => `<option value="${card.id}" ${(editing?.cardId || selectedCardId) === card.id ? "selected" : ""}>${escapeHtml(card.name)} - ${escapeHtml(card.brand)}</option>`).join("")}</select></label>
+      <label class="field"><span>CartÃ£o</span><select name="cardId">${cards.map(card => `<option value="${card.id}" ${(editing?.cardId || selectedCardId) === card.id ? "selected" : ""}>${escapeHtml(card.name)} - ${escapeHtml(card.brand)}</option>`).join("")}</select></label>
       <label class="field"><span>Nome da compra</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Celular"></label>
       <label class="field"><span>Valor total</span><div class="money-input"><b>R$</b><input name="amount" required inputmode="decimal" value="${editing ? String(editing.amount).replace(".", ",") : ""}" placeholder="0,00"></div></label>
       <div class="form-grid">
-        <label class="field"><span>Pagamento</span><select name="installments">${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${editing?.installments === index + 1 ? "selected" : ""}>${index === 0 ? "À vista" : `${index + 1}x`}</option>`).join("")}</select></label>
-        <div class="field"><span>Data de fechamento da fatura</span><div class="static-field" data-invoice-info>Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}</div></div>
+        <label class="field"><span>Pagamento</span><select name="installments">${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${editing?.installments === index + 1 ? "selected" : ""}>${index === 0 ? "Ã€ vista" : `${index + 1}x`}</option>`).join("")}</select></label>
+        <div class="field"><span>Data de fechamento da fatura</span><div class="static-field" data-invoice-info>Dia ${card?.closingDay || "-"} Â· Vence dia ${card?.dueDay || "-"}</div></div>
       </div>
       <label class="field"><span class="field-title">Categoria <button class="mini-plus" type="button" data-manage-list="categories">+</button></span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
       <label class="field"><span>Status</span><select name="status"><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
@@ -1792,9 +1797,9 @@ function cardRow(card) {
   const invoice = currentInvoice(card.id);
   return `
     <article class="mini-card ${selectedCardId === card.id ? "selected" : ""}">
-      <div><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(card.brand)} · Fecha dia ${card.closingDay} · Vence dia ${card.dueDay}</span></div>
+      <div><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(card.brand)} Â· Fecha dia ${card.closingDay} Â· Vence dia ${card.dueDay}</span></div>
       <b>${money(invoice)}</b>
-      <small>Limite: ${money(card.limit)} · Disponível: ${money(availableCardLimit(card.id))}</small>
+      <small>Limite: ${money(card.limit)} Â· DisponÃ­vel: ${money(availableCardLimit(card.id))}</small>
       <div class="row-actions">
         <button type="button" data-open-card-purchases="${card.id}">Ver compras</button>
         <button type="button" data-edit-card="${card.id}">Editar</button>
@@ -1809,9 +1814,9 @@ function purchaseRow(purchase) {
   const info = installmentInfo(purchase);
   return `
     <article class="purchase-row ${info.paid ? "paid" : ""}">
-      <div><strong>${escapeHtml(purchase.name)}</strong><span>${escapeHtml(card?.name || "Cartão")} · ${formatDate(purchase.purchaseDate, true)}</span></div>
+      <div><strong>${escapeHtml(purchase.name)}</strong><span>${escapeHtml(card?.name || "CartÃ£o")} Â· ${formatDate(purchase.purchaseDate, true)}</span></div>
       <b>${info.total}x de ${money(info.value)}</b>
-      <small>Parcela atual: ${info.current}/${info.total} · Restam ${info.remaining} · ${purchase.closed ? "Fechada" : info.paid ? "Paga" : "Pendente"}</small>
+      <small>Parcela atual: ${info.current}/${info.total} Â· Restam ${info.remaining} Â· ${purchase.closed ? "Fechada" : info.paid ? "Paga" : "Pendente"}</small>
       <div class="row-actions">
         ${info.active && !info.paid ? `<button type="button" data-pay-installment="${purchase.id}">Marcar parcela como paga</button>` : ""}
         <button type="button" data-view-installments="${purchase.id}">Ver parcelas</button>
@@ -1833,7 +1838,7 @@ function installmentRow(purchase, installmentNumber) {
     <article class="purchase-row ${paid ? "paid" : overdue ? "overdue" : ""}">
       <div><strong>${formatDate(dueDate, true)} - ${status}</strong><span>Parcela ${installmentNumber}/${purchase.installments}</span></div>
       <b>${money(purchase.amount / purchase.installments)}</b>
-      ${payment ? `<small>${escapeHtml(payment.paymentMethod)} · ${escapeHtml(payment.account)} · ${formatDate(payment.paidDate, true)} · ${escapeHtml(payment.paidTime)}</small>` : ""}
+      ${payment ? `<small>${escapeHtml(payment.paymentMethod)} Â· ${escapeHtml(payment.account)} Â· ${formatDate(payment.paidDate, true)} Â· ${escapeHtml(payment.paidTime)}</small>` : ""}
       ${!paid ? `<button type="button" data-pay-installment="${purchase.id}" data-installment-key="${key}">Marcar como paga</button>` : ""}
     </article>`;
 }
@@ -1855,15 +1860,15 @@ function profileTemplate() {
     <article class="profile-card">
       <div class="profile-avatar">${initials(user.name)}</div>
       <h2>${escapeHtml(user.name)}</h2>
-      <p>@${escapeHtml(user.username)} · ${user.role === "master" ? "Administrador master" : "Usuário"}</p>
-      ${user.role === "user" ? `<div class="access-date">Acesso válido até <b>${formatDate(user.accessExpiresAt, true)}</b></div>` : ""}
+      <p>@${escapeHtml(user.username)} Â· ${user.role === "master" ? "Administrador master" : "UsuÃ¡rio"}</p>
+      ${user.role === "user" ? `<div class="access-date">Acesso vÃ¡lido atÃ© <b>${formatDate(user.accessExpiresAt, true)}</b></div>` : ""}
     </article>
     <article class="app-version-card">
       <div>
-        <span>Versão do Aplicativo</span>
+        <span>VersÃ£o do Aplicativo</span>
         <h2>${escapeHtml(APP_NAME)}</h2>
-        <p>Versão ${escapeHtml(APP_VERSION)}</p>
-        <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
+        <p>VersÃ£o ${escapeHtml(APP_VERSION)}</p>
+        <small>Ãšltima atualizaÃ§Ã£o: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
       <div class="app-version-actions">
         ${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}
@@ -1871,24 +1876,24 @@ function profileTemplate() {
       </div>
     </article>
     <div class="menu-list">
-      ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
-      <button class="menu-item" data-view="support"><span>${isMaster() ? "Menu Suporte" : "Falar com o Suporte"}</span><b>›</b></button>
-      <button class="menu-item" data-view="security"><span>Segurança</span><b>›</b></button>
-      <button class="menu-item danger" data-logout><span>Sair da conta</span><b>›</b></button>
+      ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuÃ¡rios</span><b>â€º</b></button><button class="menu-item" data-view="reports"><span>RelatÃ³rios individuais</span><b>â€º</b></button>` : ""}
+      <button class="menu-item" data-view="support"><span>${isMaster() ? "Menu Suporte" : "Falar com o Suporte"}</span><b>â€º</b></button>
+      <button class="menu-item" data-view="security"><span>SeguranÃ§a</span><b>â€º</b></button>
+      <button class="menu-item danger" data-logout><span>Sair da conta</span><b>â€º</b></button>
     </div>`;
 }
 
 function securityTemplate() {
   return `
-    <div class="page-title"><span class="eyebrow">Proteção</span><h1>Segurança</h1><p>Informações de acesso e proteção local.</p></div>
+    <div class="page-title"><span class="eyebrow">ProteÃ§Ã£o</span><h1>SeguranÃ§a</h1><p>InformaÃ§Ãµes de acesso e proteÃ§Ã£o local.</p></div>
     <article class="security-card">
-      <h2>Armazenamento temporário</h2>
-      <p>Seus dados principais são sincronizados com o Supabase. O cache local guarda apenas arquivos temporários do aplicativo.</p>
+      <h2>Armazenamento temporÃ¡rio</h2>
+      <p>Seus dados principais sÃ£o sincronizados com o Supabase. O cache local guarda apenas arquivos temporÃ¡rios do aplicativo.</p>
     </article>
     <article class="security-card">
       <h2>Conta atual</h2>
-      <p>Usuário: <b>${escapeHtml(currentUser().username)}</b></p>
-      <p>Perfil: <b>${isMaster() ? "Master" : "Usuário comum"}</b></p>
+      <p>UsuÃ¡rio: <b>${escapeHtml(currentUser().username)}</b></p>
+      <p>Perfil: <b>${isMaster() ? "Master" : "UsuÃ¡rio comum"}</b></p>
     </article>
     <form class="admin-form" id="password-form">
       <h2>Alterar senha</h2>
@@ -1898,7 +1903,7 @@ function securityTemplate() {
       <button class="primary-button">Salvar nova senha</button>
     </form>
     <div class="menu-list">
-      <button class="menu-item" data-view="profile"><span>Voltar ao perfil</span><b>›</b></button>
+      <button class="menu-item" data-view="profile"><span>Voltar ao perfil</span><b>â€º</b></button>
     </div>`;
 }
 
@@ -1910,14 +1915,14 @@ function supportTemplate() {
 function userSupportTemplate() {
   const tickets = (db.supportTickets || []).filter(ticket => ticket.userId === session).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return `
-    <div class="page-title"><span class="eyebrow">Suporte</span><h1>Falar com o Suporte</h1><p>Envie sua dúvida para o administrador.</p></div>
+    <div class="page-title"><span class="eyebrow">Suporte</span><h1>Falar com o Suporte</h1><p>Envie sua dÃºvida para o administrador.</p></div>
     <form class="admin-form" id="support-form">
       <h2>Nova mensagem</h2>
-      <label class="field"><span>Assunto</span><input name="subject" required maxlength="80" placeholder="Ex.: Dúvida sobre renovação"></label>
+      <label class="field"><span>Assunto</span><input name="subject" required maxlength="80" placeholder="Ex.: DÃºvida sobre renovaÃ§Ã£o"></label>
       <label class="field"><span>Mensagem</span><textarea name="message" required maxlength="600" placeholder="Escreva sua mensagem"></textarea></label>
       <button class="primary-button">Enviar suporte</button>
     </form>
-    <div class="section-header"><h2>Histórico</h2><span class="list-count">${tickets.length}</span></div>
+    <div class="section-header"><h2>HistÃ³rico</h2><span class="list-count">${tickets.length}</span></div>
     <div class="support-list">${tickets.map(supportTicketRow).join("") || `<div class="empty">Nenhuma mensagem enviada.</div>`}</div>`;
 }
 
@@ -1925,7 +1930,7 @@ function masterSupportTemplate() {
   const metrics = supportMetrics();
   const tickets = filteredSupportTickets();
   return `
-    <div class="page-title"><span class="eyebrow">Área Master</span><h1>Menu Suporte</h1><p>Acompanhe solicitações dos usuários.</p></div>
+    <div class="page-title"><span class="eyebrow">Ãrea Master</span><h1>Menu Suporte</h1><p>Acompanhe solicitaÃ§Ãµes dos usuÃ¡rios.</p></div>
     <div class="metric-grid compact">
       ${insightCard("Pendentes", metrics.pending, "warning")}
       ${insightCard("Em Atendimento", metrics.progress, "neutral")}
@@ -1933,7 +1938,7 @@ function masterSupportTemplate() {
       ${insightCard("Total", metrics.total, "neutral")}
     </div>
     <section class="user-filter-panel">
-      <label class="search-field"><span>⌕</span><input id="support-search" value="${escapeAttribute(supportSearch)}" placeholder="Nome, usuário, WhatsApp ou e-mail"></label>
+      <label class="search-field"><span>âŒ•</span><input id="support-search" value="${escapeAttribute(supportSearch)}" placeholder="Nome, usuÃ¡rio, WhatsApp ou e-mail"></label>
       <div class="user-filter-grid">
         <label><span>Status</span><select id="support-status-filter">
           <option value="all">Todos</option>
@@ -1950,9 +1955,9 @@ function supportTicketRow(ticket) {
     <article class="support-card">
       <div class="support-head"><strong>${escapeHtml(ticket.subject)}</strong><span class="access-status ${ticket.status === "resolved" ? "active" : ticket.status === "progress" ? "warning" : "expired"}">${SUPPORT_STATUSES[ticket.status] || "Pendente"}</span></div>
       <p>${escapeHtml(ticket.message)}</p>
-      <small>${escapeHtml(ticket.name)} · @${escapeHtml(ticket.username)} · ${escapeHtml(ticket.whatsapp || "Sem WhatsApp")} · ${escapeHtml(ticket.email || "Sem e-mail")}</small>
-      <small>${formatDate(ticket.date, true)} · ${escapeHtml(ticket.time)}</small>
-      ${reply ? `<div class="support-reply"><b>Resposta do suporte</b><p>${escapeHtml(reply.message)}</p><small>${formatDate(reply.date, true)} · ${escapeHtml(reply.time)}</small></div>` : ""}
+      <small>${escapeHtml(ticket.name)} Â· @${escapeHtml(ticket.username)} Â· ${escapeHtml(ticket.whatsapp || "Sem WhatsApp")} Â· ${escapeHtml(ticket.email || "Sem e-mail")}</small>
+      <small>${formatDate(ticket.date, true)} Â· ${escapeHtml(ticket.time)}</small>
+      ${reply ? `<div class="support-reply"><b>Resposta do suporte</b><p>${escapeHtml(reply.message)}</p><small>${formatDate(reply.date, true)} Â· ${escapeHtml(reply.time)}</small></div>` : ""}
       ${isMaster() ? `
         <div class="support-actions">${Object.entries(SUPPORT_STATUSES).map(([value, label]) => `<button data-support-status="${value}" data-ticket-id="${ticket.id}">${label}</button>`).join("")}</div>
         <div class="support-actions support-actions-secondary">
@@ -1989,31 +1994,31 @@ function filteredSupportTickets() {
 function usersTemplate() {
   const editing = editingUserId ? regularUsers().find(user => user.id === editingUserId) : null;
   const visibleUsers = filteredUsers();
-  const title = ({ all: "Todos os usuários", active: "Usuários ativos", expiring: "Vencendo em 7 dias", expired: "Usuários vencidos" })[userListScope];
+  const title = ({ all: "Todos os usuÃ¡rios", active: "UsuÃ¡rios ativos", expiring: "Vencendo em 7 dias", expired: "UsuÃ¡rios vencidos" })[userListScope];
   return `
     <div class="page-title"><span class="eyebrow">Acesso master</span><h1>${title}</h1><p>Cadastre, renove e controle os acessos.</p></div>
-    ${!userFormOpen ? `<button class="new-user-button" data-new-user>+ NOVO USUÁRIO</button>` : ""}
+    ${!userFormOpen ? `<button class="new-user-button" data-new-user>+ NOVO USUÃRIO</button>` : ""}
     ${userFormOpen ? `<form class="admin-form" id="user-form">
       <div class="form-title-row">
-        <h2>${editing ? "Editar usuário" : "Novo usuário"}</h2>
+        <h2>${editing ? "Editar usuÃ¡rio" : "Novo usuÃ¡rio"}</h2>
         <button type="button" class="text-button" data-cancel-edit>Cancelar</button>
       </div>
       <input type="hidden" name="id" value="${editing?.id || ""}">
-      <label class="field"><span>Nome completo</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Nome do usuário"></label>
-      <label class="field"><span>Nome de Usuário</span><input name="username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" value="${escapeAttribute(editing?.username || "")}" placeholder="Ex.: cliente01"></label>
+      <label class="field"><span>Nome completo</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Nome do usuÃ¡rio"></label>
+      <label class="field"><span>Nome de UsuÃ¡rio</span><input name="username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" value="${escapeAttribute(editing?.username || "")}" placeholder="Ex.: cliente01"></label>
       <label class="field"><span>WhatsApp</span><input name="whatsapp" required inputmode="tel" value="${escapeAttribute(editing?.whatsapp || "")}" placeholder="(00) 00000-0000"></label>
       <label class="field"><span>E-mail</span><input name="email" type="email" required value="${escapeAttribute(editing?.email || "")}" placeholder="cliente@email.com"></label>
-      <label class="field"><span>${editing ? "Nova senha (opcional)" : "Senha inicial"}</span><input name="password" type="password" minlength="6" ${editing ? "" : "required"} placeholder="${editing ? "Mantenha em branco para não alterar" : "Mínimo de 6 caracteres"}"></label>
+      <label class="field"><span>${editing ? "Nova senha (opcional)" : "Senha inicial"}</span><input name="password" type="password" minlength="6" ${editing ? "" : "required"} placeholder="${editing ? "Mantenha em branco para nÃ£o alterar" : "MÃ­nimo de 6 caracteres"}"></label>
       <label class="field"><span>Validade do acesso</span><input name="accessExpiresAt" type="date" min="${dateOffset()}" required value="${editing?.accessExpiresAt || futureDate(30)}"></label>
       <div class="quick-validity">
-        <span>Definir validade rápida</span>
-        <div>${[1,2,3,6,12].map(months => `<button type="button" data-validity-months="${months}">${months} ${months === 1 ? "mês" : "meses"}</button>`).join("")}</div>
+        <span>Definir validade rÃ¡pida</span>
+        <div>${[1,2,3,6,12].map(months => `<button type="button" data-validity-months="${months}">${months} ${months === 1 ? "mÃªs" : "meses"}</button>`).join("")}</div>
       </div>
-      <label class="field"><span>Valor da renovação</span><div class="money-input"><b>R$</b><input name="renewalPrice" required inputmode="decimal" value="${String(editing?.renewalPrice ?? 49.9).replace(".", ",")}"></div></label>
-      <button class="primary-button">${editing ? "Salvar alterações" : "Cadastrar usuário"}</button>
+      <label class="field"><span>Valor da renovaÃ§Ã£o</span><div class="money-input"><b>R$</b><input name="renewalPrice" required inputmode="decimal" value="${String(editing?.renewalPrice ?? 49.9).replace(".", ",")}"></div></label>
+      <button class="primary-button">${editing ? "Salvar alteraÃ§Ãµes" : "Cadastrar usuÃ¡rio"}</button>
     </form>` : ""}
     <section class="user-filter-panel">
-      <label class="search-field"><span>⌕</span><input id="user-search" value="${escapeAttribute(userSearch)}" placeholder="Pesquisar nome, usuário, WhatsApp ou e-mail"></label>
+      <label class="search-field"><span>âŒ•</span><input id="user-search" value="${escapeAttribute(userSearch)}" placeholder="Pesquisar nome, usuÃ¡rio, WhatsApp ou e-mail"></label>
       <div class="user-filter-grid">
         <label><span>Status</span><select id="user-status-filter">
           <option value="all">Todos</option>
@@ -2021,19 +2026,19 @@ function usersTemplate() {
           <option value="blocked" ${userStatusFilter === "blocked" ? "selected" : ""}>Bloqueados</option>
           <option value="expired" ${userStatusFilter === "expired" ? "selected" : ""}>Vencidos</option>
         </select></label>
-        <label><span>Período</span><select id="user-period-filter">
-          <option value="all">Qualquer período</option>
-          <option value="7" ${userPeriodFilter === "7" ? "selected" : ""}>Próximos 7 dias</option>
-          <option value="30" ${userPeriodFilter === "30" ? "selected" : ""}>Próximos 30 dias</option>
-          <option value="expired" ${userPeriodFilter === "expired" ? "selected" : ""}>Já vencidos</option>
+        <label><span>PerÃ­odo</span><select id="user-period-filter">
+          <option value="all">Qualquer perÃ­odo</option>
+          <option value="7" ${userPeriodFilter === "7" ? "selected" : ""}>PrÃ³ximos 7 dias</option>
+          <option value="30" ${userPeriodFilter === "30" ? "selected" : ""}>PrÃ³ximos 30 dias</option>
+          <option value="expired" ${userPeriodFilter === "expired" ? "selected" : ""}>JÃ¡ vencidos</option>
         </select></label>
       </div>
       <label class="filter-date"><span>Data de vencimento</span><input id="user-expiry-filter" type="date" value="${userExpiryFilter}"></label>
       ${hasUserFilters() ? `<button class="clear-filters" data-clear-user-filters>Limpar filtros</button>` : ""}
     </section>
-    <div class="section-header"><div><span class="eyebrow">Gestão de acesso</span><h2>${title}</h2></div><span class="list-count">${visibleUsers.length}</span></div>
+    <div class="section-header"><div><span class="eyebrow">GestÃ£o de acesso</span><h2>${title}</h2></div><span class="list-count">${visibleUsers.length}</span></div>
     <div class="user-list">
-      ${visibleUsers.map(user => userRow(user)).join("") || `<div class="empty">Nenhum usuário encontrado neste filtro.</div>`}
+      ${visibleUsers.map(user => userRow(user)).join("") || `<div class="empty">Nenhum usuÃ¡rio encontrado neste filtro.</div>`}
     </div>`;
 }
 
@@ -2073,7 +2078,7 @@ function userRow(user) {
     <article class="user-card">
       <div class="user-main">
         <i>${initials(user.name)}</i>
-        <div><strong>${escapeHtml(user.name)}</strong><small>@${escapeHtml(user.username)} · ${escapeHtml(user.whatsapp || "Sem WhatsApp")}</small></div>
+        <div><strong>${escapeHtml(user.name)}</strong><small>@${escapeHtml(user.username)} Â· ${escapeHtml(user.whatsapp || "Sem WhatsApp")}</small></div>
         <span class="access-status ${status.className}">${status.label}</span>
       </div>
       <div class="user-contact"><span>${escapeHtml(user.email || "Sem e-mail")}</span><span>Dias restantes: <b>${daysLabel}</b></span></div>
@@ -2084,7 +2089,7 @@ function userRow(user) {
         <button data-toggle-user="${user.id}">${user.blocked ? "Desbloquear" : "Bloquear"}</button>
         <button class="danger" data-delete-user="${user.id}">Excluir</button>
       </div>
-      <button class="user-report-button" data-report-user="${user.id}">Ver dados e relatórios</button>
+      <button class="user-report-button" data-report-user="${user.id}">Ver dados e relatÃ³rios</button>
     </article>`;
 }
 
@@ -2093,11 +2098,11 @@ function reportsTemplate() {
   const items = filteredReportTransactions();
   const summary = totals(items);
   const balance = summary.income - summary.expense;
-  const selectedName = regularUsers().find(user => user.id === reportUserId)?.name || "Usuário";
+  const selectedName = regularUsers().find(user => user.id === reportUserId)?.name || "UsuÃ¡rio";
   return `
-    <div class="page-title"><span class="eyebrow">Acesso master</span><h1>Relatórios</h1><p>Analise dados individuais de cada usuário.</p></div>
+    <div class="page-title"><span class="eyebrow">Acesso master</span><h1>RelatÃ³rios</h1><p>Analise dados individuais de cada usuÃ¡rio.</p></div>
     <section class="report-filters">
-      <label class="field"><span>Usuário</span><select id="report-user">
+      <label class="field"><span>UsuÃ¡rio</span><select id="report-user">
         ${regularUsers().map(user => `<option value="${user.id}" ${reportUserId === user.id ? "selected" : ""}>${escapeHtml(user.name)}</option>`).join("")}
       </select></label>
       <div class="period-switch">
@@ -2105,10 +2110,10 @@ function reportsTemplate() {
         <button class="${reportPeriod === "annual" ? "active" : ""}" data-period="annual">Anual</button>
       </div>
       ${reportPeriod === "monthly"
-        ? `<label class="field"><span>Mês</span><input id="report-month" type="month" value="${reportMonth}"></label>`
+        ? `<label class="field"><span>MÃªs</span><input id="report-month" type="month" value="${reportMonth}"></label>`
         : `<label class="field"><span>Ano</span><select id="report-year">${yearOptions()}</select></label>`}
     </section>
-    <div class="report-heading"><div><span>${escapeHtml(selectedName)}</span><strong>${reportLabel()}</strong></div><b>${items.length} lançamentos</b></div>
+    <div class="report-heading"><div><span>${escapeHtml(selectedName)}</span><strong>${reportLabel()}</strong></div><b>${items.length} lanÃ§amentos</b></div>
     <div class="report-summary">
       <div><span>Receitas</span><strong class="positive">+ ${money(summary.income)}</strong></div>
       <div><span>Despesas</span><strong class="negative">- ${money(summary.expense)}</strong></div>
@@ -2118,7 +2123,7 @@ function reportsTemplate() {
       <button class="secondary-button" data-export-pdf>Exportar PDF</button>
       <button class="secondary-button" data-export-excel>Exportar Excel</button>
     </div>
-    <div class="section-header"><h2>Movimentações</h2></div>
+    <div class="section-header"><h2>MovimentaÃ§Ãµes</h2></div>
     <div class="transaction-list">${transactionRows(items, false)}</div>`;
 }
 
@@ -2163,9 +2168,9 @@ function bindLogin() {
     try {
       user = await loadUserByCredentials(username, password);
     } catch (error) {
-      return showToast("Não foi possível conectar. Verifique sua internet.");
+      return showToast("NÃ£o foi possÃ­vel conectar. Verifique sua internet.");
     }
-    if (!user) return showToast("Usuário ou senha incorretos.");
+    if (!user) return showToast("UsuÃ¡rio ou senha incorretos.");
     if (isAccessBlocked(user)) {
       event.currentTarget.insertAdjacentHTML("afterbegin", `<div class="login-alert">Seu acesso expirou. Entre em contato com o administrador.</div>`);
       return;
@@ -2180,7 +2185,7 @@ function bindLogin() {
       }
     } catch (error) {
       clearSession();
-      return showToast("Não foi possível carregar os dados do usuário.");
+      return showToast("NÃ£o foi possÃ­vel carregar os dados do usuÃ¡rio.");
     }
     currentView = "home";
     saveSession(user);
@@ -2195,11 +2200,11 @@ async function registerUser(event) {
   const username = data.get("username").trim().toLowerCase();
   const whatsapp = normalizePhone(data.get("whatsapp"));
   const email = data.get("email").trim().toLowerCase();
-  if (!/^[a-z0-9._-]{3,30}$/i.test(username)) return showToast("Use apenas letras, números, ponto, hífen ou sublinhado.");
-  if (!isValidEmail(email)) return showToast("Informe um e-mail válido.");
-  if (db.users.some(user => user.username.toLowerCase() === username)) return showToast("Este nome de usuário já existe.");
-  if (db.users.some(user => normalizePhone(user.whatsapp) === whatsapp)) return showToast("Este WhatsApp já está cadastrado.");
-  if (db.users.some(user => user.email?.toLowerCase() === email)) return showToast("Este e-mail já está cadastrado.");
+  if (!/^[a-z0-9._-]{3,30}$/i.test(username)) return showToast("Use apenas letras, nÃºmeros, ponto, hÃ­fen ou sublinhado.");
+  if (!isValidEmail(email)) return showToast("Informe um e-mail vÃ¡lido.");
+  if (db.users.some(user => user.username.toLowerCase() === username)) return showToast("Este nome de usuÃ¡rio jÃ¡ existe.");
+  if (db.users.some(user => normalizePhone(user.whatsapp) === whatsapp)) return showToast("Este WhatsApp jÃ¡ estÃ¡ cadastrado.");
+  if (db.users.some(user => user.email?.toLowerCase() === email)) return showToast("Este e-mail jÃ¡ estÃ¡ cadastrado.");
   const newId = crypto.randomUUID();
   const newUser = {
     id: newId,
@@ -2231,7 +2236,7 @@ async function registerUser(event) {
     delete db.cardPurchases[newId];
     delete db.categories[newId];
     delete db.accounts[newId];
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
   session = newId;
   authView = "login";
@@ -2240,16 +2245,16 @@ async function registerUser(event) {
   try {
     await refreshCurrentUserData();
   } catch (error) {
-    console.error("[Minhas Finanças][Supabase] erro após cadastro", error);
+    console.error("[Minhas FinanÃ§as][Supabase] erro apÃ³s cadastro", error);
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 function bindAppEvents() {
   document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => {
     const target = button.dataset.view;
-    if (!canAccessView(target)) return showToast("Você não tem permissão para acessar esta área.");
+    if (!canAccessView(target)) return showToast("VocÃª nÃ£o tem permissÃ£o para acessar esta Ã¡rea.");
     if (target === "users") userListScope = "all";
     currentView = target;
     render();
@@ -2272,7 +2277,7 @@ function bindAppEvents() {
     render();
   });
   document.querySelectorAll("[data-add], [data-add-type]").forEach(button => button.addEventListener("click", () => {
-    if (isMaster()) return showToast("Apenas usuários podem cadastrar movimentações.");
+    if (isMaster()) return showToast("Apenas usuÃ¡rios podem cadastrar movimentaÃ§Ãµes.");
     if (currentView === "card") {
       openCardDialog();
       return;
@@ -2343,7 +2348,7 @@ function bindAppEvents() {
   document.querySelector("[data-cancel-edit]")?.addEventListener("click", () => {
     editingUserId = null;
     userFormOpen = false;
-    showToast("Operação cancelada.");
+    showToast("OperaÃ§Ã£o cancelada.");
     render();
   });
   document.querySelectorAll("[data-edit-user]").forEach(button => button.addEventListener("click", () => {
@@ -2426,7 +2431,7 @@ function logout() {
   currentView = "home";
   authView = "login";
   render();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
 }
 
 async function checkAppUpdates() {
@@ -2436,8 +2441,8 @@ async function checkAppUpdates() {
     showToast("Cache atualizado com sucesso.");
     setTimeout(() => window.location.reload(), 700);
   } catch (error) {
-    console.error("[Minhas Finanças][PWA] erro ao verificar atualizações", error);
-    showToast("Não foi possível concluir a operação.");
+    console.error("[Minhas FinanÃ§as][PWA] erro ao verificar atualizaÃ§Ãµes", error);
+    showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   }
 }
 
@@ -2451,7 +2456,7 @@ async function autoCheckAppUpdates() {
       render();
     }
   } catch (error) {
-    console.warn("[Minhas Finanças][PWA] atualização automática não concluída", error);
+    console.warn("[Minhas FinanÃ§as][PWA] atualizaÃ§Ã£o automÃ¡tica nÃ£o concluÃ­da", error);
   }
 }
 
@@ -2463,17 +2468,17 @@ async function clearAppCache() {
     showToast("Cache atualizado com sucesso.");
     setTimeout(() => window.location.reload(), 700);
   } catch (error) {
-    console.error("[Minhas Finanças][PWA] erro ao limpar cache", error);
-    showToast("Não foi possível concluir a operação.");
+    console.error("[Minhas FinanÃ§as][PWA] erro ao limpar cache", error);
+    showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   }
 }
 
 async function installApp() {
   if (isStandaloneApp()) {
-    return showToast("Aplicativo já instalado.");
+    return showToast("Aplicativo jÃ¡ instalado.");
   }
   if (!deferredInstallPrompt) {
-    return showToast("Use a opção Adicionar à tela inicial do navegador.");
+    return showToast("Use a opÃ§Ã£o Adicionar Ã  tela inicial do navegador.");
   }
   deferredInstallPrompt.prompt();
   await deferredInstallPrompt.userChoice.catch(() => null);
@@ -2555,7 +2560,7 @@ function openTransactionDialog(type = "expense") {
   form.reset();
   refreshTransactionLists();
   editingTransactionId = null;
-  document.querySelector("#form-title").textContent = "Adicionar transação";
+  document.querySelector("#form-title").textContent = "Adicionar transaÃ§Ã£o";
   form.elements.dueDate.value = dateOffset();
   form.elements.type.value = type === "income" ? "income" : "expense";
   updateStatusOptions();
@@ -2568,7 +2573,7 @@ function openCardDialog(cardId = null) {
   const title = document.querySelector("#card-form-title");
   const body = document.querySelector("#card-form-body");
   if (!dialog || !title || !body) return;
-  title.textContent = cardId ? "Editar cartão" : "Novo cartão";
+  title.textContent = cardId ? "Editar cartÃ£o" : "Novo cartÃ£o";
   body.innerHTML = cardFormTemplate();
   dialog.showModal();
 }
@@ -2581,7 +2586,7 @@ function closeCardDialog() {
 function editTransaction(transactionId) {
   if (isMaster()) return;
   const item = userTransactions().find(transaction => transaction.id === transactionId);
-  if (!item) return showToast("Não foi possível concluir a operação.");
+  if (!item) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   if (item.sourcePurchaseId) {
     editingPurchaseId = item.sourcePurchaseId;
     selectedCardId = userCardPurchases().find(purchase => purchase.id === item.sourcePurchaseId)?.cardId || selectedCardId;
@@ -2598,7 +2603,7 @@ function editTransaction(transactionId) {
     if (form.elements[key]) form.elements[key].value = value;
   });
   form.elements.amount.value = String(item.amount).replace(".", ",");
-  document.querySelector("#form-title").textContent = "Editar transação";
+  document.querySelector("#form-title").textContent = "Editar transaÃ§Ã£o";
   document.querySelector("#transaction-dialog").showModal();
 }
 
@@ -2609,7 +2614,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
   if (isMaster()) return;
   const data = new FormData(event.currentTarget);
   const amount = Number(String(data.get("amount")).replace(/\./g, "").replace(",", "."));
-  if (!Number.isFinite(amount) || amount <= 0) return showToast("Informe um valor válido.");
+  if (!Number.isFinite(amount) || amount <= 0) return showToast("Informe um valor vÃ¡lido.");
   if (!await confirmAction()) return;
   const values = {
     name: data.get("name").trim(),
@@ -2626,7 +2631,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
   };
   if (isPaidStatus(values)) {
     const paidAt = nowParts();
-    values.paymentMethod = "Automático";
+    values.paymentMethod = "AutomÃ¡tico";
     values.paidDate = paidAt.date;
     values.paidTime = paidAt.time;
   }
@@ -2635,7 +2640,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
   let previousType = values.type;
   if (editingTransactionId) {
     const index = db.transactions[session].findIndex(item => item.id === editingTransactionId);
-    if (index < 0) return showToast("Não foi possível concluir a operação.");
+    if (index < 0) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
     previousType = db.transactions[session][index].type;
     db.transactions[session][index] = { ...db.transactions[session][index], ...values };
     savedItem = db.transactions[session][index];
@@ -2647,18 +2652,18 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     await saveTransactionToSupabase(savedItem, previousType);
     await refreshUserFinancialData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
   editingTransactionId = null;
   document.querySelector("#transaction-dialog").close();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 });
 
 async function deleteTransaction(transactionId) {
   if (isMaster() || !await confirmAction()) return;
   const item = (db.transactions[session] || []).find(transaction => transaction.id === transactionId);
-  if (!item) return showToast("Não foi possível concluir a operação.");
+  if (!item) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   try {
     await deleteRowById(item.type === "income" ? "receitas" : "despesas", item.id);
     db.transactions[session] = (db.transactions[session] || []).filter(transaction => transaction.id !== transactionId);
@@ -2667,26 +2672,26 @@ async function deleteTransaction(transactionId) {
   } catch (error) {
     return showDeleteError(error);
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 async function markTransactionPaid(transactionId) {
   if (isMaster() || !await confirmAction()) return;
   const item = (db.transactions[session] || []).find(transaction => transaction.id === transactionId);
-  if (!item) return showToast("Não foi possível concluir a operação.");
+  if (!item) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   item.status = item.type === "income" ? "received" : "paid";
   const paidAt = nowParts();
   item.paidDate = paidAt.date;
   item.paidTime = paidAt.time;
-  item.paymentMethod = "Automático";
+  item.paymentMethod = "AutomÃ¡tico";
   try {
     await saveTransactionToSupabase(item);
     await refreshUserFinancialData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -2715,18 +2720,18 @@ function updateStatusOptions() {
   document.querySelector("#status-label").textContent = isIncome ? "Status da receita" : "Status";
   form.elements.status.innerHTML = isIncome
     ? `<option value="pending">A receber</option><option value="received">Recebido</option>`
-    : `<option value="pending">Não pago</option><option value="paid">Pago</option>`;
+    : `<option value="pending">NÃ£o pago</option><option value="paid">Pago</option>`;
 }
 
 function updatePurchaseInvoiceInfo(event) {
   const card = userCards().find(item => item.id === event.currentTarget.value);
   const target = document.querySelector("[data-invoice-info]");
-  if (target) target.textContent = `Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}`;
+  if (target) target.textContent = `Dia ${card?.closingDay || "-"} Â· Vence dia ${card?.dueDay || "-"}`;
 }
 
 async function saveSupportTicket(event) {
   event.preventDefault();
-  if (isMaster()) return showToast("Acesso não autorizado.");
+  if (isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const data = new FormData(event.currentTarget);
   const user = currentUser();
   const now = new Date();
@@ -2747,35 +2752,35 @@ async function saveSupportTicket(event) {
   });
   saveDatabase();
   event.currentTarget.reset();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 async function updateSupportStatus(ticketId, status) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
-  if (!ticket || !SUPPORT_STATUSES[status]) return showToast("Não foi possível concluir a operação.");
+  if (!ticket || !SUPPORT_STATUSES[status]) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   if (!await confirmAction()) return;
   ticket.status = status;
   ticket.updatedAt = new Date().toISOString();
   saveDatabase();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 function toggleSupportReply(ticketId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
-  if (!ticket) return showToast("Não foi possível concluir a operação.");
+  if (!ticket) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   ticket.replyOpen = !ticket.replyOpen;
   render();
 }
 
 async function sendSupportReply(event) {
   event.preventDefault();
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === event.currentTarget.dataset.replyForm);
-  if (!ticket) return showToast("Não foi possível concluir a operação.");
+  if (!ticket) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   const data = new FormData(event.currentTarget);
   const now = new Date();
   ticket.reply = {
@@ -2787,24 +2792,24 @@ async function sendSupportReply(event) {
   ticket.status = "progress";
   ticket.replyOpen = false;
   saveDatabase();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 function openSupportWhatsapp(ticketId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
-  if (!ticket) return showToast("Não foi possível concluir a operação.");
+  if (!ticket) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   const phone = normalizePhone(ticket.whatsapp);
-  if (!phone) return showToast("WhatsApp não informado.");
-  const message = `Olá, ${ticket.name}.\n\nRecebi sua solicitação pelo Minhas Finanças.\n\nChamado:\n${ticket.subject}\n\nComo posso ajudar?`;
+  if (!phone) return showToast("WhatsApp nÃ£o informado.");
+  const message = `OlÃ¡, ${ticket.name}.\n\nRecebi sua solicitaÃ§Ã£o pelo Minhas FinanÃ§as.\n\nChamado:\n${ticket.subject}\n\nComo posso ajudar?`;
   window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(message)}`, "_blank");
 }
 
 async function deleteSupportTicket(ticketId) {
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
   if (!ticket || !await confirmAction()) return;
-  if (!isMaster() && ticket.userId !== session) return showToast("Acesso não autorizado.");
+  if (!isMaster() && ticket.userId !== session) return showToast("Acesso nÃ£o autorizado.");
   try {
     await deleteRowById("suporte", ticketId);
     if (isMaster()) await refreshMasterData();
@@ -2812,13 +2817,13 @@ async function deleteSupportTicket(ticketId) {
   } catch (error) {
     return showDeleteError(error);
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 async function saveUser(event) {
   event.preventDefault();
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const data = new FormData(event.currentTarget);
   const id = data.get("id");
   const username = data.get("username").trim().toLowerCase();
@@ -2826,19 +2831,19 @@ async function saveUser(event) {
   const normalizedWhatsapp = normalizePhone(whatsapp);
   const email = data.get("email").trim().toLowerCase();
   if (!/^[a-z0-9._-]{3,30}$/i.test(username)) {
-    return showToast("Use apenas letras, números, ponto, hífen ou sublinhado.");
+    return showToast("Use apenas letras, nÃºmeros, ponto, hÃ­fen ou sublinhado.");
   }
-  if (!isValidEmail(email)) return showToast("Informe um e-mail válido.");
-  if (db.users.some(user => user.username.toLowerCase() === username && user.id !== id)) return showToast("Este nome de usuário já existe.");
-  if (normalizedWhatsapp && db.users.some(user => normalizePhone(user.whatsapp) === normalizedWhatsapp && user.id !== id)) return showToast("Este WhatsApp já está cadastrado.");
-  if (db.users.some(user => user.email?.toLowerCase() === email && user.id !== id)) return showToast("Este e-mail já está cadastrado.");
+  if (!isValidEmail(email)) return showToast("Informe um e-mail vÃ¡lido.");
+  if (db.users.some(user => user.username.toLowerCase() === username && user.id !== id)) return showToast("Este nome de usuÃ¡rio jÃ¡ existe.");
+  if (normalizedWhatsapp && db.users.some(user => normalizePhone(user.whatsapp) === normalizedWhatsapp && user.id !== id)) return showToast("Este WhatsApp jÃ¡ estÃ¡ cadastrado.");
+  if (db.users.some(user => user.email?.toLowerCase() === email && user.id !== id)) return showToast("Este e-mail jÃ¡ estÃ¡ cadastrado.");
   if (!await confirmAction()) return;
   const renewalPrice = Number(String(data.get("renewalPrice")).replace(/\./g, "").replace(",", "."));
-  if (!Number.isFinite(renewalPrice) || renewalPrice < 0) return showToast("Não foi possível concluir a operação.");
+  if (!Number.isFinite(renewalPrice) || renewalPrice < 0) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
 
   if (id) {
     const user = regularUsers().find(item => item.id === id);
-    if (!user) return showToast("Usuário não encontrado.");
+    if (!user) return showToast("UsuÃ¡rio nÃ£o encontrado.");
     user.name = data.get("name").trim();
     user.username = username;
     user.whatsapp = whatsapp;
@@ -2873,9 +2878,9 @@ async function saveUser(event) {
   try {
     await refreshMasterData();
   } catch (error) {
-    console.error("[Minhas Finanças][Supabase] erro ao recarregar usuários master", error);
+    console.error("[Minhas FinanÃ§as][Supabase] erro ao recarregar usuÃ¡rios master", error);
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -2894,10 +2899,10 @@ async function deleteUserCascade(userId) {
 }
 
 async function deleteUser(userId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
-  if (userId === session) return showToast("Ação não permitida para o Master.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
+  if (userId === session) return showToast("AÃ§Ã£o nÃ£o permitida para o Master.");
   const user = db.users.find(item => item.id === userId);
-  if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
+  if (!user || user.role === "master") return showToast("AÃ§Ã£o nÃ£o permitida para o Master.");
   if (!await confirmAction()) return;
   try {
     await deleteUserCascade(userId);
@@ -2907,29 +2912,29 @@ async function deleteUser(userId) {
   }
   if (reportUserId === userId) reportUserId = "all";
   if (editingUserId === userId) editingUserId = null;
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 async function toggleUserBlock(userId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
-  if (userId === session) return showToast("Ação não permitida para o Master.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
+  if (userId === session) return showToast("AÃ§Ã£o nÃ£o permitida para o Master.");
   const user = db.users.find(item => item.id === userId);
-  if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
+  if (!user || user.role === "master") return showToast("AÃ§Ã£o nÃ£o permitida para o Master.");
   if (!await confirmAction()) return;
   user.blocked = !user.blocked;
   try {
     await saveDatabase();
     await refreshMasterData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 async function renewUser(userId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!isMaster()) return showToast("Acesso nÃ£o autorizado.");
   const user = regularUsers().find(item => item.id === userId);
   if (!user) return;
   const newDate = await chooseRenewalDate(user);
@@ -2943,9 +2948,9 @@ async function renewUser(userId) {
     await saveDatabase();
     await refreshMasterData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -2965,7 +2970,7 @@ function chooseRenewalDate(user) {
       dialog.removeEventListener("cancel", onCancelEvent);
       dialog.close();
       renewTargetUserId = null;
-      if (!value) showToast("Operação cancelada.");
+      if (!value) showToast("OperaÃ§Ã£o cancelada.");
       resolve(value);
     };
     const fromMonths = months => {
@@ -2994,17 +2999,17 @@ async function saveCard(event) {
   const id = data.get("id");
   const name = data.get("name").trim();
   const duplicate = userCards().some(card => card.name.toLowerCase() === name.toLowerCase() && card.id !== id);
-  if (duplicate) return showToast("Não foi possível concluir a operação.");
+  if (duplicate) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   const limit = parseMoney(data.get("limit"));
   const closingDay = Number(data.get("closingDay"));
   const dueDay = Number(data.get("dueDay"));
-  if (!Number.isFinite(limit) || limit <= 0 || closingDay < 1 || closingDay > 31 || dueDay < 1 || dueDay > 31) return showToast("Não foi possível concluir a operação.");
+  if (!Number.isFinite(limit) || limit <= 0 || closingDay < 1 || closingDay > 31 || dueDay < 1 || dueDay > 31) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   if (!await confirmAction()) return;
   db.cards[session] ||= [];
   let savedCard;
   if (id) {
     const card = db.cards[session].find(item => item.id === id);
-    if (!card) return showToast("Não foi possível concluir a operação.");
+    if (!card) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
     Object.assign(card, { name, brand: data.get("brand"), limit, closingDay, dueDay });
     savedCard = card;
     editingCardId = null;
@@ -3019,11 +3024,11 @@ async function saveCard(event) {
     await refreshUserFinancialData();
     selectedCardId = savedCard.id;
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
   document.querySelector("#card-dialog")?.close();
   editingCardId = null;
-  showToast("Cartão salvo com sucesso.");
+  showToast("CartÃ£o salvo com sucesso.");
   render();
 }
 
@@ -3034,7 +3039,7 @@ async function saveCardPurchase(event) {
   const id = data.get("id");
   const amount = parseMoney(data.get("amount"));
   const installments = Number(data.get("installments"));
-  if (!Number.isFinite(amount) || amount <= 0 || installments < 1 || installments > 12) return showToast("Não foi possível concluir a operação.");
+  if (!Number.isFinite(amount) || amount <= 0 || installments < 1 || installments > 12) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   if (!await confirmAction()) return;
   db.cardPurchases[session] ||= [];
   const values = {
@@ -3056,7 +3061,7 @@ async function saveCardPurchase(event) {
   let savedPurchase;
   if (id) {
     const purchase = db.cardPurchases[session].find(item => item.id === id);
-    if (!purchase) return showToast("Não foi possível concluir a operação.");
+    if (!purchase) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
     const previousPaid = purchase.paidInstallments || [];
     const wasFullyPaid = allInstallmentsPaid(purchase);
     Object.assign(purchase, values);
@@ -3089,7 +3094,7 @@ async function saveCardPurchase(event) {
     await refreshUserFinancialData();
     selectedCardId = savedPurchase.cardId;
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
   purchaseFormOpen = false;
   editingPurchaseId = null;
@@ -3110,12 +3115,12 @@ function allInstallmentKeys(purchase) {
 function ensureInstallmentPayments(purchase) {
   purchase.installmentPayments ||= {};
   const paidAt = nowParts();
-  const account = userCards().find(card => card.id === purchase.cardId)?.name || "Cartão";
+  const account = userCards().find(card => card.id === purchase.cardId)?.name || "CartÃ£o";
   (purchase.paidInstallments || []).forEach(key => {
     purchase.installmentPayments[key] ||= {
       paidDate: paidAt.date,
       paidTime: paidAt.time,
-      paymentMethod: "Cartão",
+      paymentMethod: "CartÃ£o",
       account
     };
   });
@@ -3140,8 +3145,8 @@ function syncPaidInstallmentTransactions(purchase) {
       dueDate: `${key.slice(0, 7)}-01`,
       status: "paid",
       category: purchase.category || "Outros",
-      account: payment.account || "Cartão",
-      paymentMethod: payment.paymentMethod || "Cartão",
+      account: payment.account || "CartÃ£o",
+      paymentMethod: payment.paymentMethod || "CartÃ£o",
       paidDate: payment.paidDate || dateOffset(),
       paidTime: payment.paidTime || nowParts().time
     });
@@ -3151,7 +3156,7 @@ function syncPaidInstallmentTransactions(purchase) {
 async function deleteCard(cardId) {
   if (isMaster() || !await confirmAction()) return;
   const card = userCards().find(item => item.id === cardId);
-  if (!card) return showToast("Não foi possível concluir a operação.");
+  if (!card) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   try {
     await deleteCardCascade(cardId);
     db.cards[session] = (db.cards[session] || []).filter(item => item.id !== cardId);
@@ -3163,7 +3168,7 @@ async function deleteCard(cardId) {
     return showDeleteError(error);
   }
   if (selectedCardId === cardId) selectedCardId = userCards()[0]?.id || null;
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -3177,7 +3182,7 @@ async function deleteCardCascade(cardId) {
 async function deletePurchase(purchaseId) {
   if (isMaster() || !await confirmAction()) return;
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
-  if (!purchase) return showToast("Não foi possível concluir a operação.");
+  if (!purchase) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   try {
     await deletePurchaseCascade(purchaseId);
     db.cardPurchases[session] = (db.cardPurchases[session] || []).filter(item => item.id !== purchaseId);
@@ -3189,7 +3194,7 @@ async function deletePurchase(purchaseId) {
   }
   selectedCardId = purchase.cardId;
   currentView = "cardPurchases";
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -3202,19 +3207,19 @@ async function deletePurchaseCascade(purchaseId) {
 async function payCardInstallment(purchaseId, installmentKey = null) {
   if (isMaster() || !await confirmAction()) return;
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
-  if (!purchase) return showToast("Não foi possível concluir a operação.");
+  if (!purchase) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   const info = installmentInfo(purchase);
   const key = installmentKey || info.key;
-  if (!installmentKey && (!info.active || info.paid)) return showToast("Não foi possível concluir a operação.");
-  if ((purchase.paidInstallments || []).includes(key)) return showToast("Não foi possível concluir a operação.");
+  if (!installmentKey && (!info.active || info.paid)) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
+  if ((purchase.paidInstallments || []).includes(key)) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   purchase.paidInstallments ||= [];
   purchase.installmentPayments ||= {};
   const paidAt = nowParts();
   purchase.installmentPayments[key] = {
     paidDate: paidAt.date,
     paidTime: paidAt.time,
-    paymentMethod: "Cartão",
-    account: userCards().find(card => card.id === purchase.cardId)?.name || "Cartão"
+    paymentMethod: "CartÃ£o",
+    account: userCards().find(card => card.id === purchase.cardId)?.name || "CartÃ£o"
   };
   purchase.paidInstallments.push(key);
   db.transactions[session] ||= [];
@@ -3225,9 +3230,9 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
     await refreshUserFinancialData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -3235,17 +3240,17 @@ async function payCardInvoice(cardId) {
   if (isMaster()) return;
   const pending = userCardPurchases().filter(purchase => purchase.cardId === cardId).map(purchase => ({ purchase, info: installmentInfo(purchase) })).filter(item => item.info.active && !item.info.paid);
   const total = pending.reduce((sum, item) => sum + item.info.value, 0);
-  if (!pending.length || total <= 0) return showToast("Não há fatura pendente para este cartão.");
+  if (!pending.length || total <= 0) return showToast("NÃ£o hÃ¡ fatura pendente para este cartÃ£o.");
   if (!await confirmInvoicePayment(total)) return;
   const paidAt = nowParts();
-  const account = userCards().find(card => card.id === cardId)?.name || "Cartão";
+  const account = userCards().find(card => card.id === cardId)?.name || "CartÃ£o";
   pending.forEach(({ purchase, info }) => {
     purchase.paidInstallments ||= [];
     purchase.installmentPayments ||= {};
     purchase.installmentPayments[info.key] = {
       paidDate: paidAt.date,
       paidTime: paidAt.time,
-      paymentMethod: "Cartão",
+      paymentMethod: "CartÃ£o",
       account
     };
     if (!purchase.paidInstallments.includes(info.key)) purchase.paidInstallments.push(info.key);
@@ -3257,24 +3262,24 @@ async function payCardInvoice(cardId) {
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
     await refreshUserFinancialData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
 async function closePurchase(purchaseId) {
   if (isMaster() || !await confirmAction()) return;
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
-  if (!purchase || !allInstallmentsPaid(purchase)) return showToast("Não foi possível concluir a operação.");
+  if (!purchase || !allInstallmentsPaid(purchase)) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   purchase.closed = true;
   try {
     await savePurchaseToSupabase(purchase);
     await refreshUserFinancialData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
   render();
 }
 
@@ -3283,13 +3288,13 @@ async function changePassword(event) {
   const data = new FormData(event.currentTarget);
   const user = currentUser();
   if (data.get("currentPassword") !== user.password || data.get("newPassword") !== data.get("confirmPassword")) {
-    return showToast("Não foi possível concluir a operação.");
+    return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   }
   if (!await confirmAction()) return;
   user.password = data.get("newPassword");
   saveDatabase();
   event.currentTarget.reset();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
 }
 
 function parseMoney(value) {
@@ -3320,7 +3325,7 @@ document.querySelector("#list-form").addEventListener("submit", async event => {
   if (!name) return;
   const list = activeListType === "categories" ? db.categories[session] : db.accounts[session];
   const duplicate = list.some(item => item.toLowerCase() === name.toLowerCase() && item !== editingListItem);
-  if (duplicate) return showToast("Não foi possível concluir a operação.");
+  if (duplicate) return showToast("NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.");
   if (!await confirmAction()) return;
   if (editingListItem) {
     const index = list.indexOf(editingListItem);
@@ -3333,7 +3338,7 @@ document.querySelector("#list-form").addEventListener("submit", async event => {
     await saveListItemToSupabase(activeListType, name);
     await refreshUserFinancialData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    return showToast("NÃ£o foi possÃ­vel salvar no Supabase.");
   }
   if (activeListType === "categories") preferredCategory = name;
   else preferredAccount = name;
@@ -3344,7 +3349,7 @@ document.querySelector("#list-form").addEventListener("submit", async event => {
   refreshPurchaseLists();
   preferredCategory = "";
   preferredAccount = "";
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
 });
 
 function openListManager(type) {
@@ -3398,7 +3403,7 @@ async function deleteListItem(item) {
   renderListManager();
   refreshTransactionLists();
   refreshPurchaseLists();
-  showToast("Operação realizada com sucesso.");
+  showToast("OperaÃ§Ã£o realizada com sucesso.");
 }
 
 function updateTransactionsListValue(type, oldValue, newValue) {
@@ -3433,10 +3438,10 @@ function exportPdf() {
   const items = filteredReportTransactions();
   const summary = totals(items);
   const owner = regularUsers().find(user => user.id === reportUserId)?.name;
-  const rows = items.map(item => `<tr><td>${escapeHtml(item.ownerName || owner)}</td><td>${formatDate(item.dueDate, true)}</td><td>${escapeHtml(item.name)}</td><td>${typeLabel(item.type)}</td><td>${escapeHtml(item.category)}</td><td>${item.status === "paid" ? "Pago" : "Não pago"}</td><td>${money(item.amount)}</td></tr>`).join("");
+  const rows = items.map(item => `<tr><td>${escapeHtml(item.ownerName || owner)}</td><td>${formatDate(item.dueDate, true)}</td><td>${escapeHtml(item.name)}</td><td>${typeLabel(item.type)}</td><td>${escapeHtml(item.category)}</td><td>${item.status === "paid" ? "Pago" : "NÃ£o pago"}</td><td>${money(item.amount)}</td></tr>`).join("");
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) return showToast("Permita pop-ups para exportar o PDF.");
-  reportWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Relatório financeiro</title><style>body{font:14px Arial;color:#17221f;padding:32px}h1{margin-bottom:4px}p{color:#667}section{display:flex;gap:12px;margin:24px 0}section div{padding:14px;background:#f3f6f4;border-radius:8px}strong{display:block;font-size:18px;margin-top:5px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #ddd;font-size:11px}th{background:#173c32;color:white}@media print{body{padding:0}}</style></head><body><h1>Relatório financeiro</h1><p>${escapeHtml(owner)} · ${escapeHtml(reportLabel())}</p><section><div>Receitas<strong>${money(summary.income)}</strong></div><div>Despesas<strong>${money(summary.expense)}</strong></div><div>Resultado<strong>${money(summary.income - summary.expense)}</strong></div></section><table><thead><tr><th>Usuário</th><th>Data</th><th>Descrição</th><th>Tipo</th><th>Categoria</th><th>Status</th><th>Valor</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Sem movimentações no período.</td></tr>`}</tbody></table><script>window.onload=()=>window.print();<\/script></body></html>`);
+  reportWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>RelatÃ³rio financeiro</title><style>body{font:14px Arial;color:#17221f;padding:32px}h1{margin-bottom:4px}p{color:#667}section{display:flex;gap:12px;margin:24px 0}section div{padding:14px;background:#f3f6f4;border-radius:8px}strong{display:block;font-size:18px;margin-top:5px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #ddd;font-size:11px}th{background:#173c32;color:white}@media print{body{padding:0}}</style></head><body><h1>RelatÃ³rio financeiro</h1><p>${escapeHtml(owner)} Â· ${escapeHtml(reportLabel())}</p><section><div>Receitas<strong>${money(summary.income)}</strong></div><div>Despesas<strong>${money(summary.expense)}</strong></div><div>Resultado<strong>${money(summary.income - summary.expense)}</strong></div></section><table><thead><tr><th>UsuÃ¡rio</th><th>Data</th><th>DescriÃ§Ã£o</th><th>Tipo</th><th>Categoria</th><th>Status</th><th>Valor</th></tr></thead><tbody>${rows || `<tr><td colspan="7">Sem movimentaÃ§Ãµes no perÃ­odo.</td></tr>`}</tbody></table><script>window.onload=()=>window.print();<\/script></body></html>`);
   reportWindow.document.close();
 }
 
@@ -3445,8 +3450,8 @@ function exportExcel() {
   ensureIndividualReportUser();
   const items = filteredReportTransactions();
   const owner = regularUsers().find(user => user.id === reportUserId)?.name;
-  const rows = items.map(item => `<tr><td>${escapeHtml(item.ownerName || owner)}</td><td>${formatDate(item.dueDate, true)}</td><td>${escapeHtml(item.name)}</td><td>${typeLabel(item.type)}</td><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.account)}</td><td>${item.status === "paid" ? "Pago" : "Não pago"}</td><td>${item.amount.toFixed(2).replace(".", ",")}</td></tr>`).join("");
-  const content = `\ufeff<html><head><meta charset="utf-8"></head><body><table><tr><th colspan="8">Relatório financeiro - ${escapeHtml(reportLabel())}</th></tr><tr><th>Usuário</th><th>Data</th><th>Descrição</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Status</th><th>Valor</th></tr>${rows}</table></body></html>`;
+  const rows = items.map(item => `<tr><td>${escapeHtml(item.ownerName || owner)}</td><td>${formatDate(item.dueDate, true)}</td><td>${escapeHtml(item.name)}</td><td>${typeLabel(item.type)}</td><td>${escapeHtml(item.category)}</td><td>${escapeHtml(item.account)}</td><td>${item.status === "paid" ? "Pago" : "NÃ£o pago"}</td><td>${item.amount.toFixed(2).replace(".", ",")}</td></tr>`).join("");
+  const content = `\ufeff<html><head><meta charset="utf-8"></head><body><table><tr><th colspan="8">RelatÃ³rio financeiro - ${escapeHtml(reportLabel())}</th></tr><tr><th>UsuÃ¡rio</th><th>Data</th><th>DescriÃ§Ã£o</th><th>Tipo</th><th>Categoria</th><th>Conta</th><th>Status</th><th>Valor</th></tr>${rows}</table></body></html>`;
   downloadBlob(new Blob([content], { type: "application/vnd.ms-excel;charset=utf-8" }), `relatorio-financeiro-${reportPeriod === "monthly" ? reportMonth : reportYear}.xls`);
 }
 
@@ -3463,7 +3468,7 @@ function downloadBlob(blob, filename) {
 }
 
 function typeLabel(type) {
-  return ({ income: "Receita", expense: "Despesa", card: "Cartão" })[type] || type;
+  return ({ income: "Receita", expense: "Despesa", card: "CartÃ£o" })[type] || type;
 }
 
 function greeting() {
@@ -3500,7 +3505,7 @@ function confirmAction() {
       noButton.removeEventListener("click", onNo);
       dialog.removeEventListener("cancel", onCancel);
       dialog.close();
-      if (!confirmed) showToast("Operação cancelada.");
+      if (!confirmed) showToast("OperaÃ§Ã£o cancelada.");
       resolve(confirmed);
     };
     const onYes = () => finish(true);
@@ -3552,7 +3557,7 @@ async function initializeApp() {
       db = cached;
       isOfflineMode = true;
       lastSyncError = "";
-      showToast("Você está offline. As alterações serão sincronizadas quando a internet voltar.");
+      showToast("VocÃª estÃ¡ offline. As alteraÃ§Ãµes serÃ£o sincronizadas quando a internet voltar.");
     } else {
       lastSyncError = error.message;
     }
@@ -3592,7 +3597,7 @@ window.addEventListener("online", async () => {
 window.addEventListener("offline", () => {
   isOfflineMode = true;
   render();
-  showToast("Você está offline. As alterações serão sincronizadas quando a internet voltar.");
+  showToast("VocÃª estÃ¡ offline. As alteraÃ§Ãµes serÃ£o sincronizadas quando a internet voltar.");
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) autoCheckAppUpdates();
