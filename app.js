@@ -1,6 +1,6 @@
 const SESSION_KEY = "minhas-financas-session";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = "1.0.18";
+const APP_VERSION = "1.0.19";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -784,7 +784,7 @@ function isMaster() {
 }
 
 function regularUsers() {
-  return isMaster() ? db.users : db.users.filter(user => user.role === "user");
+  return db.users.filter(user => user.role === "user");
 }
 
 function isExpired(user) {
@@ -2750,8 +2750,9 @@ async function deleteUserCascade(userId) {
 
 async function deleteUser(userId) {
   if (!isMaster()) return showToast("Acesso não autorizado.");
-  const user = regularUsers().find(item => item.id === userId);
-  if (!user) return;
+  if (userId === session) return showToast("Ação não permitida para o Master.");
+  const user = db.users.find(item => item.id === userId);
+  if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
   if (!await confirmAction()) return;
   try {
     await deleteUserCascade(userId);
@@ -2767,8 +2768,10 @@ async function deleteUser(userId) {
 
 async function toggleUserBlock(userId) {
   if (!isMaster()) return showToast("Acesso não autorizado.");
-  const user = regularUsers().find(item => item.id === userId);
-  if (!user || !await confirmAction()) return;
+  if (userId === session) return showToast("Ação não permitida para o Master.");
+  const user = db.users.find(item => item.id === userId);
+  if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
+  if (!await confirmAction()) return;
   user.blocked = !user.blocked;
   saveDatabase();
   showToast("Operação realizada com sucesso.");
