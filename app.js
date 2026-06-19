@@ -4,7 +4,7 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.29";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.30";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1867,6 +1867,8 @@ function cardPurchasesTemplate() {
   if (selectedCardId && !cards.some(card => card.id === selectedCardId)) selectedCardId = cards[0]?.id || null;
   const selectedCard = cards.find(card => card.id === selectedCardId);
   const purchases = userCardPurchases().filter(purchase => !selectedCardId || purchase.cardId === selectedCardId);
+  const pendingPurchases = purchases.filter(purchaseHasOpenInstallment);
+  const paidThisMonth = purchases.filter(purchasePaidThisMonth);
   if (!selectedCard) return `<div class="page-title"><span class="eyebrow">Compras</span><h1>Nenhum cartão</h1><p>Cadastre um cartão para lançar compras.</p></div><button class="primary-button" data-view="card">Voltar para cartões</button>`;
   return `
     <div class="page-title"><span class="eyebrow">Compras do cartão</span><h1>Compras - ${escapeHtml(selectedCard.name)}</h1><p>Gerencie compras, parcelas e pagamentos deste cartão.</p></div>
@@ -1877,8 +1879,20 @@ function cardPurchasesTemplate() {
     <div class="card-actions-row single">
       <button class="secondary-button" data-view="card">Voltar</button>
     </div>
-    <div class="section-header"><h2>Compras</h2><span class="list-count">${purchases.length}</span></div>
-    <div class="purchase-list">${purchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra cadastrada neste cartão.</div>`}</div>`;
+    <div class="section-header"><h2>A Pagar</h2><span class="list-count">${pendingPurchases.length}</span></div>
+    <div class="purchase-list">${pendingPurchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra com parcela pendente.</div>`}</div>
+    <div class="section-header"><h2>Pagas no Mês</h2><span class="list-count">${paidThisMonth.length}</span></div>
+    <div class="purchase-list">${paidThisMonth.map(purchaseRow).join("") || `<div class="empty">Nenhuma parcela paga neste mês.</div>`}</div>`;
+}
+
+function purchaseHasOpenInstallment(purchase) {
+  const info = installmentInfo(purchase);
+  return info.active && !info.paid;
+}
+
+function purchasePaidThisMonth(purchase) {
+  const current = monthKey();
+  return Object.values(purchase.installmentPayments || {}).some(payment => payment.paidDate?.slice(0, 7) === current);
 }
 
 function purchaseEditorTemplate() {
