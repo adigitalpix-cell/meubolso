@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.34";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.35";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -2736,6 +2736,17 @@ function smartInstallButtonTemplate() {
   return "";
 }
 
+function isiOSDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function installInstructionsMessage() {
+  if (isiOSDevice()) {
+    return "Para instalar no iPhone:\n1. Abra este site no Safari.\n2. Toque no botão de compartilhar.\n3. Escolha 'Adicionar à Tela de Início'.";
+  }
+  return "Para instalar o aplicativo, use a opção Adicionar à tela inicial ou Instalar aplicativo do navegador.";
+}
+
 async function handleSmartInstall() {
   if (isMaster()) return;
   if (!isStandaloneApp()) {
@@ -2747,7 +2758,7 @@ async function handleSmartInstall() {
       render();
       return;
     }
-    showToast("Use a opção Adicionar à tela inicial do navegador.");
+    showToast(installInstructionsMessage());
     return;
   }
   await activateNotifications();
