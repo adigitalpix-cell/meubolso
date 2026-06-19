@@ -1,9 +1,10 @@
 const SESSION_KEY = "minhas-financas-session";
 const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
+const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.28";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.29";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -208,6 +209,41 @@ function hasOfflineQueue() {
   return offlineQueue().length > 0;
 }
 
+function activityLog() {
+  try {
+    return JSON.parse(localStorage.getItem(ACTIVITY_LOG_KEY) || "[]");
+  } catch {
+    localStorage.removeItem(ACTIVITY_LOG_KEY);
+    return [];
+  }
+}
+
+function saveActivityLog(items) {
+  localStorage.setItem(ACTIVITY_LOG_KEY, JSON.stringify(items.slice(0, 500)));
+}
+
+function logActivity(message, userId = session) {
+  if (!userId || !message) return;
+  const now = new Date();
+  const item = {
+    id: crypto.randomUUID(),
+    userId,
+    message,
+    date: localDateKey(now),
+    time: now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    createdAt: now.toISOString()
+  };
+  saveActivityLog([item, ...activityLog()]);
+}
+
+function actionVerb(isEditing, createText, editText) {
+  return isEditing ? editText : createText;
+}
+
+function userActivityLog(userId = session) {
+  return activityLog().filter(item => item.userId === userId).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
 function isNetworkError(error) {
   return !navigator.onLine || error?.name === "TypeError" || /fetch|network|failed/i.test(error?.message || "");
 }
@@ -405,13 +441,13 @@ function supabaseAnd(...filters) {
 }
 
 function showDeleteError(error) {
-  console.error("[Minhas Finan�as][Supabase] erro ao excluir", error);
+  console.error("[Minhas Finanças][Supabase] erro ao excluir", error);
   if (isOfflineMode || hasOfflineQueue() || isNetworkError(error)) {
-    showToast("Exclus�o salva offline. Ser� sincronizada quando a internet voltar.");
+    showToast("Exclusão salva offline. Será sincronizada quando a internet voltar.");
     render();
     return;
   }
-  showToast("N�o foi poss�vel concluir a opera��o.");
+  showToast("Não foi possível concluir a operação.");
 }
 
 async function supabaseSelect(table, query = "select=*") {
@@ -481,6 +517,7 @@ async function syncOfflineQueue() {
     }
     saveOfflineQueue([]);
     isOfflineMode = false;
+    logActivity("Sincronizou alterações offline.");
     if (session) {
       if (isMaster()) await refreshMasterData();
       else await refreshUserFinancialData();
@@ -1055,6 +1092,7 @@ function cardInstallmentItems(userId = session) {
       const dueDate = installmentDueDate(purchase, installmentNumber);
       const key = `${monthKey(dueDate)}-${installmentNumber}`;
       const paid = (purchase.paidInstallments || []).includes(key);
+      const payment = purchase.installmentPayments?.[key] || {};
       return {
         id: `${purchase.id}-${key}`,
         source: "card-installment-virtual",
@@ -1066,6 +1104,8 @@ function cardInstallmentItems(userId = session) {
         type: "expense",
         repeat: "none",
         dueDate,
+        paidDate: payment.paidDate || "",
+        paidTime: payment.paidTime || "",
         status: paid ? "paid" : "pending",
         category: purchase.category || "Outros",
         account: card?.name || "Cartão",
@@ -1163,7 +1203,7 @@ function render() {
 
 function canAccessView(view) {
   if (isMaster()) return ["home", "users", "reports", "support", "profile", "security", "masterDashboard", "graphDashboard"].includes(view);
-  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
+  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
 }
 
 function loginTemplate(message = "") {
@@ -1246,6 +1286,7 @@ function viewTemplate() {
   if (currentView === "masterDashboard" && isMaster()) return masterDashboardTemplate();
   if (currentView === "support") return supportTemplate();
   if (currentView === "profile") return profileTemplate();
+  if (currentView === "activityLog" && !isMaster()) return activityLogTemplate();
   if (currentView === "security") return securityTemplate();
   if (currentView === "users" && isMaster()) return usersTemplate();
   if (currentView === "reports" && isMaster()) return reportsTemplate();
@@ -1369,10 +1410,10 @@ function dashboardDetailRows(type) {
     if (type === "today") return item.status === "pending" && item.type !== "income" && item.dueDate === today;
     if (type === "soon") return item.status === "pending" && item.type !== "income" && item.dueDate > today && item.dueDate <= seven;
     if (type === "overdue" || type === "overdueValue") return item.status === "pending" && item.type !== "income" && item.dueDate < today;
-    if (type === "received") return item.type === "income" && isPaidStatus(item) && item.dueDate?.slice(0, 7) === current;
-    if (type === "toReceive") return item.type === "income" && !isPaidStatus(item) && item.dueDate?.slice(0, 7) === current;
-    if (type === "paid") return item.type !== "income" && isPaidStatus(item) && item.dueDate?.slice(0, 7) === current;
-    if (type === "toPay") return item.type !== "income" && !isPaidStatus(item) && item.dueDate?.slice(0, 7) === current;
+    if (type === "received") return item.type === "income" && isPaidStatus(item) && paidMonthKey(item) === current;
+    if (type === "toReceive") return item.type === "income" && !isPaidStatus(item) && dueMonthKey(item) === current;
+    if (type === "paid") return item.type !== "income" && isPaidStatus(item) && paidMonthKey(item) === current;
+    if (type === "toPay") return item.type !== "income" && !isPaidStatus(item) && dueMonthKey(item) === current;
     return false;
   });
   return transactionRows(items, false, true);
@@ -1389,13 +1430,16 @@ function invoiceDetailRows() {
 function financialDashboard() {
   const current = monthKey();
   const items = dashboardTransactions();
-  const monthTransactions = items.filter(item => item.dueDate?.slice(0, 7) === current);
-  const monthIncome = monthTransactions.filter(item => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
-  const monthExpense = monthTransactions.filter(item => item.type !== "income").reduce((sum, item) => sum + item.amount, 0);
-  const receivedMonth = monthTransactions.filter(item => item.type === "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const toReceiveMonth = monthTransactions.filter(item => item.type === "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const paidMonth = monthTransactions.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const toPayMonth = monthTransactions.filter(item => item.type !== "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const monthTransactions = items.filter(item => dueMonthKey(item) === current);
+  const receivedItemsMonth = items.filter(item => item.type === "income" && isPaidStatus(item) && paidMonthKey(item) === current);
+  const paidItemsMonth = items.filter(item => item.type !== "income" && isPaidStatus(item) && paidMonthKey(item) === current);
+  const pendingItemsMonth = items.filter(item => !isPaidStatus(item) && dueMonthKey(item) === current);
+  const monthIncome = [...receivedItemsMonth, ...pendingItemsMonth.filter(item => item.type === "income")].reduce((sum, item) => sum + item.amount, 0);
+  const monthExpense = [...paidItemsMonth, ...pendingItemsMonth.filter(item => item.type !== "income")].reduce((sum, item) => sum + item.amount, 0);
+  const receivedMonth = receivedItemsMonth.reduce((sum, item) => sum + item.amount, 0);
+  const toReceiveMonth = pendingItemsMonth.filter(item => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
+  const paidMonth = paidItemsMonth.reduce((sum, item) => sum + item.amount, 0);
+  const toPayMonth = pendingItemsMonth.filter(item => item.type !== "income").reduce((sum, item) => sum + item.amount, 0);
   const balance = receivedMonth - paidMonth;
   const today = dateOffset();
   const seven = dateOffset(7);
@@ -1426,7 +1470,7 @@ function balanceAuditTemplate() {
   const current = monthKey();
   const dashboard = financialDashboard();
   const items = dashboardTransactions();
-  const monthItems = items.filter(item => item.dueDate?.slice(0, 7) === current);
+  const monthItems = items.filter(item => isPaidStatus(item) ? paidMonthKey(item) === current : dueMonthKey(item) === current);
   const incomeItems = monthItems.filter(item => item.type === "income");
   const manualExpenseItems = monthItems.filter(item => item.type !== "income" && item.source !== "card-installment-virtual");
   const cardItems = monthItems.filter(item => item.source === "card-installment-virtual");
@@ -1517,6 +1561,14 @@ function isPaidStatus(item) {
   return item.status === "paid" || item.status === "received";
 }
 
+function paidMonthKey(item) {
+  return (item.paidDate || item.dueDate || "").slice(0, 7);
+}
+
+function dueMonthKey(item) {
+  return (item.dueDate || "").slice(0, 7);
+}
+
 function upcomingDueRows(items) {
   const rows = items
     .filter(item => item.dueDate >= dateOffset())
@@ -1591,7 +1643,7 @@ function graphDashboardTemplate() {
   const dashboard = financialDashboard();
   const items = dashboardTransactions();
   const current = monthKey();
-  const monthItems = items.filter(item => item.dueDate?.slice(0, 7) === current);
+  const monthItems = items.filter(item => isPaidStatus(item) ? paidMonthKey(item) === current : dueMonthKey(item) === current);
   const income = monthItems.filter(item => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
   const expenses = monthItems.filter(item => item.type !== "income").reduce((sum, item) => sum + item.amount, 0);
   const paidBills = monthItems.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
@@ -1662,7 +1714,7 @@ function balanceTrend() {
     date.setMonth(date.getMonth() - (3 - index));
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
     const value = items
-      .filter(item => item.dueDate?.slice(0, 7) === key && isPaidStatus(item))
+      .filter(item => paidMonthKey(item) === key && isPaidStatus(item))
       .reduce((sum, item) => sum + (item.type === "income" ? item.amount : -item.amount), 0);
     return { label: new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(date), value };
   });
@@ -1916,7 +1968,6 @@ function purchaseRow(purchase) {
         <button type="button" data-edit-purchase="${purchase.id}">Editar</button>
         <button type="button" class="danger" data-delete-purchase="${purchase.id}">Excluir</button>
       </div>
-      ${allInstallmentsPaid(purchase) && !purchase.closed ? `<button class="close-purchase" type="button" data-close-purchase="${purchase.id}">Fechar compra</button>` : ""}
     </article>`;
 }
 
@@ -1968,6 +2019,7 @@ function profileTemplate() {
     </article>
     <div class="menu-list">
       ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
+      ${!isMaster() ? `<button class="menu-item" data-view="activityLog"><span>Histórico de atividades</span><b>›</b></button>` : ""}
       <button class="menu-item" data-view="support"><span>${isMaster() ? "Menu Suporte" : "Falar com o Suporte"}</span><b>›</b></button>
       <button class="menu-item" data-view="security"><span>Segurança</span><b>›</b></button>
       <button class="menu-item danger" data-logout><span>Sair da conta</span><b>›</b></button>
@@ -1996,6 +2048,24 @@ function securityTemplate() {
     <div class="menu-list">
       <button class="menu-item" data-view="profile"><span>Voltar ao perfil</span><b>›</b></button>
     </div>`;
+}
+
+function activityLogTemplate() {
+  const items = userActivityLog();
+  return `
+    <div class="page-title"><span class="eyebrow">Sua conta</span><h1>Histórico de atividades</h1><p>Últimas ações realizadas neste aparelho.</p></div>
+    <button class="secondary-button back-button" data-view="profile">Voltar ao perfil</button>
+    <div class="activity-list">
+      ${items.length ? items.map(activityRow).join("") : `<div class="empty">Nenhuma atividade registrada ainda.</div>`}
+    </div>`;
+}
+
+function activityRow(item) {
+  return `
+    <article class="activity-row">
+      <strong>${formatDate(item.date, true)} ${escapeHtml(item.time)}</strong>
+      <span>${escapeHtml(item.message)}</span>
+    </article>`;
 }
 
 function supportTemplate() {
@@ -2215,7 +2285,14 @@ function reportsTemplate() {
       <button class="secondary-button" data-export-excel>Exportar Excel</button>
     </div>
     <div class="section-header"><h2>Movimentações</h2></div>
-    <div class="transaction-list">${transactionRows(items, false)}</div>`;
+    <div class="transaction-list">${transactionRows(items, false)}</div>
+    <div class="section-header"><h2>Histórico de atividades</h2></div>
+    <div class="activity-list">${masterActivityRows(reportUserId)}</div>`;
+}
+
+function masterActivityRows(userId) {
+  const items = userActivityLog(userId);
+  return items.length ? items.map(activityRow).join("") : `<div class="empty">Nenhuma atividade registrada neste aparelho.</div>`;
 }
 
 function ensureIndividualReportUser() {
@@ -2280,6 +2357,7 @@ function bindLogin() {
     }
     currentView = "home";
     saveSession(user);
+    logActivity("Fez login no aplicativo.", user.id);
     render();
   });
   document.querySelector("#register-form")?.addEventListener("submit", registerUser);
@@ -2421,7 +2499,6 @@ function bindAppEvents() {
     currentView = "installments";
     render();
   }));
-  document.querySelectorAll("[data-close-purchase]").forEach(button => button.addEventListener("click", () => closePurchase(button.dataset.closePurchase)));
   document.querySelectorAll("[data-manage-list]").forEach(button => {
     button.onclick = () => openListManager(button.dataset.manageList);
   });
@@ -2805,6 +2882,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
   db.transactions[session] ||= [];
   let savedItem;
   let previousType = values.type;
+  const wasEditingTransaction = Boolean(editingTransactionId);
   if (editingTransactionId) {
     const index = db.transactions[session].findIndex(item => item.id === editingTransactionId);
     if (index < 0) return showToast("Não foi possível concluir a operação.");
@@ -2821,6 +2899,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
+  logActivity(`${actionVerb(wasEditingTransaction, "Cadastrou", "Editou")} ${savedItem.type === "income" ? "receita" : "despesa"} ${savedItem.name}. Valor: ${money(savedItem.amount)}`);
   editingTransactionId = null;
   document.querySelector("#transaction-dialog").close();
   showToast("Operação realizada com sucesso.");
@@ -2839,6 +2918,7 @@ async function deleteTransaction(transactionId) {
   } catch (error) {
     return showDeleteError(error);
   }
+  logActivity(`Excluiu ${item.type === "income" ? "receita" : "despesa"} ${item.name}. Valor: ${money(item.amount)}`);
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -2858,6 +2938,7 @@ async function markTransactionPaid(transactionId) {
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
+  logActivity(`${item.type === "income" ? "Marcou receita como recebida" : "Marcou despesa como paga"}: ${item.name}. Valor: ${money(item.amount)}`);
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -3174,6 +3255,7 @@ async function saveCard(event) {
   if (!await confirmAction()) return;
   db.cards[session] ||= [];
   let savedCard;
+  const wasEditingCard = Boolean(id);
   if (id) {
     const card = db.cards[session].find(item => item.id === id);
     if (!card) return showToast("Não foi possível concluir a operação.");
@@ -3195,6 +3277,7 @@ async function saveCard(event) {
   }
   document.querySelector("#card-dialog")?.close();
   editingCardId = null;
+  logActivity(`${actionVerb(wasEditingCard, "Cadastrou cartão", "Editou cartão")} ${savedCard.name}. Limite: ${money(savedCard.limit)}`);
   showToast("Cartão salvo com sucesso.");
   render();
 }
@@ -3226,6 +3309,7 @@ async function saveCardPurchase(event) {
     return showToast("Limite insuficiente para esta compra.");
   }
   let savedPurchase;
+  const wasEditingPurchase = Boolean(id);
   if (id) {
     const purchase = db.cardPurchases[session].find(item => item.id === id);
     if (!purchase) return showToast("Não foi possível concluir a operação.");
@@ -3267,6 +3351,8 @@ async function saveCardPurchase(event) {
   editingPurchaseId = null;
   selectedCardId = savedPurchase.cardId;
   currentView = "cardPurchases";
+  const purchaseCard = userCards().find(card => card.id === savedPurchase.cardId);
+  logActivity(`${actionVerb(wasEditingPurchase, "Cadastrou compra", "Editou compra")} ${savedPurchase.name} no cartão ${purchaseCard?.name || "Cartão"}. Valor: ${money(savedPurchase.amount)}`);
   showToast("Compra salva com sucesso.");
   render();
 }
@@ -3335,6 +3421,7 @@ async function deleteCard(cardId) {
     return showDeleteError(error);
   }
   if (selectedCardId === cardId) selectedCardId = userCards()[0]?.id || null;
+  logActivity(`Excluiu cartão ${card.name}.`);
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -3361,6 +3448,7 @@ async function deletePurchase(purchaseId) {
   }
   selectedCardId = purchase.cardId;
   currentView = "cardPurchases";
+  logActivity(`Excluiu compra ${purchase.name}. Valor: ${money(purchase.amount)}`);
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -3399,6 +3487,7 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
+  logActivity(`Marcou parcela ${purchase.name} como paga. Valor: ${money(info.value)}`);
   showToast("Operação realizada com sucesso.");
   render();
 }
@@ -3431,6 +3520,8 @@ async function payCardInvoice(cardId) {
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
+  const paidCard = userCards().find(card => card.id === cardId);
+  logActivity(`Pagou fatura do cartão ${paidCard?.name || "Cartão"}. Valor: ${money(total)}`);
   showToast("Operação realizada com sucesso.");
   render();
 }
