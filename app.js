@@ -3,8 +3,9 @@ const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
+const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.33";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.34";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -15,6 +16,7 @@ let deferredInstallPrompt = null;
 let serviceWorkerReloading = false;
 let isOfflineMode = !navigator.onLine;
 let isSyncingOfflineQueue = false;
+let dueNotificationTimer = null;
 
 const seed = {
   users: [
@@ -1196,9 +1198,11 @@ function render() {
     return;
   }
 
+  applyNotificationViewFromUrl();
   if (!canAccessView(currentView)) currentView = "home";
   app.innerHTML = shellTemplate();
   bindAppEvents();
+  scheduleDueNotificationCheck();
 }
 
 function canAccessView(view) {
@@ -2787,6 +2791,7 @@ async function activateNotifications() {
     }).catch(() => null);
   }
   showToast("Notificações ativadas com sucesso.");
+  scheduleDueNotificationCheck();
   render();
 }
 
@@ -2827,6 +2832,103 @@ async function testNotification() {
   }
   showToast("Notificação de teste enviada.");
   render();
+}
+
+function scheduleDueNotificationCheck() {
+  clearTimeout(dueNotificationTimer);
+  if (!session || isMaster() || notificationPermission() !== "granted") return;
+  dueNotificationTimer = setTimeout(() => checkDueNotifications(), 700);
+}
+
+function dueNotificationLogKey() {
+  return `${DUE_NOTIFICATION_LOG_KEY}:${session}:${dateOffset()}`;
+}
+
+function sentDueNotificationKeys() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(dueNotificationLogKey()) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSentDueNotificationKeys(keys) {
+  localStorage.setItem(dueNotificationLogKey(), JSON.stringify([...keys]));
+}
+
+function dueNotificationCandidates() {
+  const today = dateOffset();
+  const items = userTransactions()
+    .filter(item => ["income", "expense"].includes(item.type))
+    .filter(item => !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
+    .map(item => {
+      const kind = item.type === "income" ? "Receita" : "Despesa";
+      const state = item.dueDate === today ? "vence hoje" : "está vencida";
+      return {
+        key: `${item.type}:${item.id}:${item.dueDate}:${state}`,
+        body: `${kind} ${item.name} ${state}. Valor: ${money(item.amount)}`,
+        url: "/?view=transactions"
+      };
+    });
+
+  const cardGroups = new Map();
+  cardInstallmentItems()
+    .filter(item => !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
+    .forEach(item => {
+      const state = item.dueDate === today ? "vence hoje" : "está vencida";
+      const groupKey = `${item.cardName}:${item.dueDate}:${state}`;
+      const current = cardGroups.get(groupKey) || { cardName: item.cardName, dueDate: item.dueDate, state, amount: 0 };
+      current.amount += item.amount;
+      cardGroups.set(groupKey, current);
+    });
+
+  const cardItems = [...cardGroups.values()].map(group => ({
+    key: `card:${group.cardName}:${group.dueDate}:${group.state}`,
+    body: `Fatura ${group.cardName} ${group.state}. Valor: ${money(group.amount)}`,
+    url: "/?view=card"
+  }));
+
+  return [...items, ...cardItems];
+}
+
+async function showAppNotification(body, tag, url = "/") {
+  if (notificationPermission() !== "granted") return false;
+  const registration = await navigator.serviceWorker?.ready?.catch(() => null);
+  const options = {
+    body,
+    icon: "/icon-192.svg",
+    badge: "/icon-192.svg",
+    tag,
+    data: { url }
+  };
+  if (registration?.showNotification) {
+    await registration.showNotification("Meu Bolso", options);
+    return true;
+  }
+  if ("Notification" in window) {
+    new Notification("Meu Bolso", options);
+    return true;
+  }
+  return false;
+}
+
+async function checkDueNotifications() {
+  if (!session || isMaster() || notificationPermission() !== "granted") return;
+  const sent = sentDueNotificationKeys();
+  const pending = dueNotificationCandidates().filter(item => !sent.has(item.key));
+  for (const item of pending) {
+    const delivered = await showAppNotification(item.body, `due-${item.key}`, item.url).catch(() => false);
+    if (delivered) sent.add(item.key);
+  }
+  if (pending.length) saveSentDueNotificationKeys(sent);
+}
+
+function applyNotificationViewFromUrl() {
+  const view = new URLSearchParams(window.location.search).get("view");
+  if (!view) return;
+  if (view === "transactions") currentView = "transactions";
+  if (view === "card") currentView = "card";
+  window.history.replaceState({}, "", window.location.pathname || "/");
 }
 async function updateServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
