@@ -3,7 +3,7 @@ const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.26";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.27";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1393,18 +1393,16 @@ function financialDashboard() {
   const monthTransactions = items.filter(item => item.dueDate?.slice(0, 7) === current);
   const monthIncome = monthTransactions.filter(item => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
   const monthExpense = monthTransactions.filter(item => item.type !== "income").reduce((sum, item) => sum + item.amount, 0);
-  const confirmedIncome = items.filter(item => item.type === "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const confirmedExpenses = items.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const balance = confirmedIncome - confirmedExpenses;
+  const receivedMonth = monthTransactions.filter(item => item.type === "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const toReceiveMonth = monthTransactions.filter(item => item.type === "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const paidMonth = monthTransactions.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const toPayMonth = monthTransactions.filter(item => item.type !== "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
+  const balance = receivedMonth - paidMonth;
   const today = dateOffset();
   const seven = dateOffset(7);
   const pendingBills = items.filter(item => item.status === "pending" && item.type !== "income");
   const invoice = currentInvoice();
   const limit = totalCardLimit();
-  const receivedMonth = monthTransactions.filter(item => item.type === "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const toReceiveMonth = monthTransactions.filter(item => item.type === "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const paidMonth = monthTransactions.filter(item => item.type !== "income" && isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
-  const toPayMonth = monthTransactions.filter(item => item.type !== "income" && !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0);
   const overdueItems = pendingBills.filter(item => item.dueDate < today);
   return {
     balance,
@@ -1451,9 +1449,10 @@ function balanceAuditTemplate() {
       <button class="secondary-button back-button" data-view="home">Voltar ao início</button>
       <article class="audit-formula">
         <span>Fórmula usada hoje</span>
-        <strong>Saldo atual = receitas pagas confirmadas de todos os períodos - despesas/parcelas pagas confirmadas de todos os períodos</strong>
-        <p>${money(totals.allPaidIncome)} - ${money(totals.allPaidExpenses)} = <b>${money(dashboard.balance)}</b></p>
+        <strong>Saldo atual do mês = receitas recebidas no mês - despesas pagas no mês - parcelas/faturas de cartão pagas no mês</strong>
+        <p>${money(totals.paidIncome)} - ${money(totals.paidExpenses)} - ${money(totals.paidCard)} = <b>${money(dashboard.balance)}</b></p>
         <small>Cards do mês: Receitas ${money(dashboard.monthIncome)} · Despesas ${money(dashboard.monthExpense)}</small>
+        <small>Comparativo antigo: todos os períodos dariam ${money(totals.allPaidIncome - totals.allPaidExpenses)}</small>
       </article>
       ${auditTotalsTemplate(totals, dashboard.balance)}
       ${auditSectionTemplate("Receitas consideradas no mês", incomeItems, "income")}
