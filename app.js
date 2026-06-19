@@ -4,7 +4,7 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.30";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.31";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1823,7 +1823,9 @@ function statusLabel(item) {
 
 function transactionsTemplate() {
   const total = totals();
-  const filtered = userTransactions().filter(item => transactionFilter === "all" || item.type === transactionFilter);
+  const filtered = userTransactions()
+    .filter(item => transactionFilter === "all" || item.type === transactionFilter)
+    .sort((a, b) => `${b.paidDate || b.dueDate || ""} ${b.paidTime || ""}`.localeCompare(`${a.paidDate || a.dueDate || ""} ${a.paidTime || ""}`));
   return `
     <div class="page-title"><span class="eyebrow">Seu histórico</span><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></div>
     <div class="summary-grid">
@@ -1867,8 +1869,16 @@ function cardPurchasesTemplate() {
   if (selectedCardId && !cards.some(card => card.id === selectedCardId)) selectedCardId = cards[0]?.id || null;
   const selectedCard = cards.find(card => card.id === selectedCardId);
   const purchases = userCardPurchases().filter(purchase => !selectedCardId || purchase.cardId === selectedCardId);
-  const pendingPurchases = purchases.filter(purchaseHasOpenInstallment);
-  const paidThisMonth = purchases.filter(purchasePaidThisMonth);
+  const pendingPurchases = purchases
+    .filter(purchaseHasOpenInstallment)
+    .sort((a, b) => (nextPendingInstallment(a)?.dueDate || "").localeCompare(nextPendingInstallment(b)?.dueDate || ""));
+  const paidThisMonth = purchases
+    .filter(purchasePaidThisMonth)
+    .sort((a, b) => {
+      const paidA = latestMonthlyPayment(a);
+      const paidB = latestMonthlyPayment(b);
+      return `${paidB?.paidDate || ""} ${paidB?.paidTime || ""}`.localeCompare(`${paidA?.paidDate || ""} ${paidA?.paidTime || ""}`);
+    });
   if (!selectedCard) return `<div class="page-title"><span class="eyebrow">Compras</span><h1>Nenhum cartão</h1><p>Cadastre um cartão para lançar compras.</p></div><button class="primary-button" data-view="card">Voltar para cartões</button>`;
   return `
     <div class="page-title"><span class="eyebrow">Compras do cartão</span><h1>Compras - ${escapeHtml(selectedCard.name)}</h1><p>Gerencie compras, parcelas e pagamentos deste cartão.</p></div>
@@ -1893,6 +1903,25 @@ function purchaseHasOpenInstallment(purchase) {
 function purchasePaidThisMonth(purchase) {
   const current = monthKey();
   return Object.values(purchase.installmentPayments || {}).some(payment => payment.paidDate?.slice(0, 7) === current);
+}
+
+function nextPendingInstallment(purchase) {
+  for (let index = 1; index <= purchase.installments; index += 1) {
+    const dueDate = installmentDueDate(purchase, index);
+    const key = `${monthKey(dueDate)}-${index}`;
+    if (!(purchase.paidInstallments || []).includes(key)) {
+      return { number: index, dueDate, key, value: purchase.amount / purchase.installments };
+    }
+  }
+  return null;
+}
+
+function latestMonthlyPayment(purchase) {
+  const current = monthKey();
+  return Object.entries(purchase.installmentPayments || {})
+    .map(([key, payment]) => ({ key, ...payment }))
+    .filter(payment => payment.paidDate?.slice(0, 7) === current)
+    .sort((a, b) => `${b.paidDate} ${b.paidTime || ""}`.localeCompare(`${a.paidDate} ${a.paidTime || ""}`))[0] || null;
 }
 
 function purchaseEditorTemplate() {
@@ -1971,11 +2000,17 @@ function cardRow(card) {
 function purchaseRow(purchase) {
   const card = userCards().find(item => item.id === purchase.cardId);
   const info = installmentInfo(purchase);
+  const nextPending = nextPendingInstallment(purchase);
+  const monthlyPayment = latestMonthlyPayment(purchase);
+  const paidCount = (purchase.paidInstallments || []).length;
+  const status = allInstallmentsPaid(purchase) ? "Quitada" : info.paid ? "Parcela do mês paga" : "Parcela pendente";
   return `
     <article class="purchase-row ${info.paid ? "paid" : ""}">
       <div><strong>${escapeHtml(purchase.name)}</strong><span>${escapeHtml(card?.name || "Cartão")} · ${formatDate(purchase.purchaseDate, true)}</span></div>
       <b>${info.total}x de ${money(info.value)}</b>
-      <small>Parcela atual: ${info.current}/${info.total} · Restam ${info.remaining} · ${purchase.closed ? "Fechada" : info.paid ? "Paga" : "Pendente"}</small>
+      <small>Status real: ${status} · Pagas ${paidCount}/${info.total} · Valor da parcela: ${money(info.value)}</small>
+      ${nextPending ? `<small>Próxima parcela pendente: ${nextPending.number}/${info.total} · Vence em ${formatDate(nextPending.dueDate, true)}</small>` : `<small>Próxima parcela pendente: nenhuma</small>`}
+      ${monthlyPayment ? `<small>Parcela paga no mês: ${escapeHtml(monthlyPayment.key)} · ${formatDate(monthlyPayment.paidDate, true)} ${escapeHtml(monthlyPayment.paidTime || "")}</small>` : `<small>Parcela paga no mês: nenhuma</small>`}
       <div class="row-actions">
         ${info.active && !info.paid ? `<button type="button" data-pay-installment="${purchase.id}">Marcar parcela como paga</button>` : ""}
         <button type="button" data-view-installments="${purchase.id}">Ver parcelas</button>
