@@ -3,7 +3,7 @@ const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.25";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.26";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1163,7 +1163,7 @@ function render() {
 
 function canAccessView(view) {
   if (isMaster()) return ["home", "users", "reports", "support", "profile", "security", "masterDashboard", "graphDashboard"].includes(view);
-  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "support"].includes(view);
+  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
 }
 
 function loginTemplate(message = "") {
@@ -1242,6 +1242,7 @@ function viewTemplate() {
   if (currentView === "financialDashboard" && !isMaster()) return financialDashboardTemplate();
   if (currentView === "graphDashboard") return graphDashboardTemplate();
   if (currentView === "dashboardDetail" && !isMaster()) return dashboardDetailTemplate(dashboardDetail);
+  if (currentView === "balanceAudit" && !isMaster()) return balanceAuditTemplate();
   if (currentView === "masterDashboard" && isMaster()) return masterDashboardTemplate();
   if (currentView === "support") return supportTemplate();
   if (currentView === "profile") return profileTemplate();
@@ -1315,7 +1316,10 @@ function homeTemplate() {
       ${dashboardShortcut("paid", "Pago no mês", money(dashboard.paidMonth))}
       ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
     </div>
-    <div class="master-actions"><button class="primary-button" data-view="graphDashboard">Dashboard</button></div>`;
+    <div class="master-actions">
+      <button class="primary-button" data-view="graphDashboard">Dashboard</button>
+      <button class="secondary-button" data-view="balanceAudit">Auditoria do Saldo</button>
+    </div>`;
 }
 
 function dashboardShortcut(detail, label, value, className = "") {
@@ -1419,6 +1423,96 @@ function financialDashboard() {
     upcomingRows: upcomingDueRows(pendingBills),
     cardSummaries: cardSummaryRows()
   };
+}
+
+function balanceAuditTemplate() {
+  const current = monthKey();
+  const dashboard = financialDashboard();
+  const items = dashboardTransactions();
+  const monthItems = items.filter(item => item.dueDate?.slice(0, 7) === current);
+  const incomeItems = monthItems.filter(item => item.type === "income");
+  const manualExpenseItems = monthItems.filter(item => item.type !== "income" && item.source !== "card-installment-virtual");
+  const cardItems = monthItems.filter(item => item.source === "card-installment-virtual");
+  const allPaidIncome = items.filter(item => item.type === "income" && isPaidStatus(item));
+  const allPaidExpenses = items.filter(item => item.type !== "income" && isPaidStatus(item));
+  const totals = {
+    paidIncome: incomeItems.filter(isPaidStatus).reduce((sum, item) => sum + item.amount, 0),
+    pendingIncome: incomeItems.filter(item => !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0),
+    paidExpenses: manualExpenseItems.filter(isPaidStatus).reduce((sum, item) => sum + item.amount, 0),
+    pendingExpenses: manualExpenseItems.filter(item => !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0),
+    paidCard: cardItems.filter(isPaidStatus).reduce((sum, item) => sum + item.amount, 0),
+    pendingCard: cardItems.filter(item => !isPaidStatus(item)).reduce((sum, item) => sum + item.amount, 0),
+    allPaidIncome: allPaidIncome.reduce((sum, item) => sum + item.amount, 0),
+    allPaidExpenses: allPaidExpenses.reduce((sum, item) => sum + item.amount, 0)
+  };
+  return `
+    <section class="dashboard-detail-page audit-page">
+      <div class="page-title"><span class="eyebrow">Ferramenta temporária</span><h1>Auditoria do Saldo</h1><p>Mostrando somente dados do usuário logado: ${escapeHtml(currentUser()?.name || "")}</p></div>
+      <button class="secondary-button back-button" data-view="home">Voltar ao início</button>
+      <article class="audit-formula">
+        <span>Fórmula usada hoje</span>
+        <strong>Saldo atual = receitas pagas confirmadas de todos os períodos - despesas/parcelas pagas confirmadas de todos os períodos</strong>
+        <p>${money(totals.allPaidIncome)} - ${money(totals.allPaidExpenses)} = <b>${money(dashboard.balance)}</b></p>
+        <small>Cards do mês: Receitas ${money(dashboard.monthIncome)} · Despesas ${money(dashboard.monthExpense)}</small>
+      </article>
+      ${auditTotalsTemplate(totals, dashboard.balance)}
+      ${auditSectionTemplate("Receitas consideradas no mês", incomeItems, "income")}
+      ${auditSectionTemplate("Despesas consideradas no mês", manualExpenseItems, "expense")}
+      ${auditSectionTemplate("Parcelas/faturas de cartão consideradas no mês", cardItems, "card")}
+    </section>`;
+}
+
+function auditTotalsTemplate(totals, balance) {
+  return `
+    <div class="audit-grid">
+      ${auditTotalCard("Total receitas pagas", totals.paidIncome, "positive")}
+      ${auditTotalCard("Total receitas pendentes", totals.pendingIncome)}
+      ${auditTotalCard("Total despesas pagas", totals.paidExpenses, "negative")}
+      ${auditTotalCard("Total despesas pendentes", totals.pendingExpenses)}
+      ${auditTotalCard("Total parcelas cartão pagas", totals.paidCard, "negative")}
+      ${auditTotalCard("Total parcelas cartão pendentes", totals.pendingCard)}
+      ${auditTotalCard("Saldo calculado final", balance, balance >= 0 ? "positive" : "negative")}
+    </div>`;
+}
+
+function auditTotalCard(label, value, tone = "") {
+  return `<article class="audit-total ${tone}"><span>${label}</span><strong>${money(value)}</strong></article>`;
+}
+
+function auditSectionTemplate(title, items, type) {
+  return `
+    <article class="audit-section">
+      <div class="section-header"><h2>${title}</h2><span class="list-count">${items.length}</span></div>
+      ${items.length ? items.map(item => auditItemRow(item, type)).join("") : `<div class="empty">Nenhum item encontrado neste grupo.</div>`}
+    </article>`;
+}
+
+function auditItemRow(item, type) {
+  const purchase = item.sourcePurchaseId ? userCardPurchases().find(purchaseItem => purchaseItem.id === item.sourcePurchaseId) : null;
+  const card = purchase ? userCards().find(cardItem => cardItem.id === purchase.cardId) : null;
+  const origin = auditOriginLabel(item);
+  if (type === "card") {
+    return `
+      <div class="audit-row">
+        <strong>${escapeHtml(item.cardName || card?.name || "Cartão")}</strong>
+        <span>Compra: ${escapeHtml(purchase?.name || item.name)} · Parcela: ${escapeHtml(item.sourceInstallment || item.name)}</span>
+        <span>Valor: ${money(item.amount)} · Status: ${statusLabel(item)} · Vencimento: ${formatDate(item.dueDate, true)}</span>
+        <small>Origem da tabela: ${origin}</small>
+      </div>`;
+  }
+  return `
+    <div class="audit-row">
+      <strong>${escapeHtml(item.name)}</strong>
+      <span>Valor: ${money(item.amount)} · Status: ${statusLabel(item)}</span>
+      <span>Vencimento: ${formatDate(item.dueDate, true)} · Pagamento: ${item.paidDate ? formatDate(item.paidDate, true) : "Sem pagamento"}</span>
+      <small>Origem da tabela: ${origin}</small>
+    </div>`;
+}
+
+function auditOriginLabel(item) {
+  if (item.source === "card-installment-virtual") return "parcelas/compras_cartao (gerada pelo app)";
+  if (item.source === "card-installment") return "despesas (parcela de cartão paga)";
+  return item.type === "income" ? "receitas" : "despesas";
 }
 
 function isPaidStatus(item) {
