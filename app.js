@@ -4,7 +4,7 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.32";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.33";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -2557,6 +2557,7 @@ function bindAppEvents() {
   });
   document.querySelector("[data-check-updates]")?.addEventListener("click", checkAppUpdates);
   document.querySelector("[data-smart-install]")?.addEventListener("click", handleSmartInstall);
+  document.querySelector("[data-test-notification]")?.addEventListener("click", testNotification);
   document.querySelector("#user-form")?.addEventListener("submit", saveUser);
   document.querySelector("[data-new-user]")?.addEventListener("click", () => {
     editingUserId = null;
@@ -2709,7 +2710,7 @@ function notificationBlockedNotice() {
 }
 
 function profileVersionActionsTemplate() {
-  const actions = `${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}${smartInstallButtonTemplate()}`;
+  const actions = `${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}${smartInstallButtonTemplate()}${!isMaster() ? `<button type="button" data-test-notification>Testar Notificação</button>` : ""}`;
   return actions ? `<div class="app-version-actions">${actions}</div>` : "";
 }
 
@@ -2786,6 +2787,45 @@ async function activateNotifications() {
     }).catch(() => null);
   }
   showToast("Notificações ativadas com sucesso.");
+  render();
+}
+
+async function testNotification() {
+  if (isMaster()) return;
+  if (!notificationsSupported()) {
+    showToast("Notificações indisponíveis neste navegador.");
+    return;
+  }
+  if (Notification.permission === "denied") {
+    localStorage.setItem(NOTIFICATION_BLOCK_NOTICE_KEY, "1");
+    showToast("Notificações bloqueadas. Ative nas configurações do navegador ou aplicativo.");
+    render();
+    return;
+  }
+  const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+  if (permission !== "granted") {
+    localStorage.setItem(NOTIFICATION_BLOCK_NOTICE_KEY, "1");
+    showToast("Notificações bloqueadas. Ative nas configurações do navegador ou aplicativo.");
+    render();
+    return;
+  }
+  localStorage.removeItem(NOTIFICATION_BLOCK_NOTICE_KEY);
+  const registration = await navigator.serviceWorker.ready.catch(() => null);
+  if (registration?.showNotification) {
+    await registration.showNotification("Meu Bolso", {
+      body: "Notificações ativadas com sucesso.",
+      icon: "/icon-192.svg",
+      badge: "/icon-192.svg",
+      tag: "meu-bolso-teste-notificacao",
+      data: { url: "/" }
+    });
+  } else {
+    new Notification("Meu Bolso", {
+      body: "Notificações ativadas com sucesso.",
+      icon: "/icon-192.svg"
+    });
+  }
+  showToast("Notificação de teste enviada.");
   render();
 }
 async function updateServiceWorker() {
