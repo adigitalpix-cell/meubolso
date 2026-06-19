@@ -268,6 +268,8 @@ button { cursor: pointer; }
 .mini-card b, .purchase-row b { display: block; margin-top: 10px; color: var(--green); }
 .mini-card small, .purchase-row small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .purchase-row small { line-height: 1.35; }
+.purchase-main { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; }
+.purchase-main b { margin-top: 0; text-align: right; font-size: 13px; }
 .purchase-row.paid { border-color: #cde8dc; background: #fbfffd; }
 .purchase-row.overdue { border-color: #f3c8c8; background: #fff8f8; }
 .purchase-row button { min-height: 34px; border: 0; border-radius: 9px; color: var(--green); background: var(--green-soft); font-size: 10px; font-weight: 800; }

@@ -4,7 +4,7 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.31";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.32";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1896,8 +1896,7 @@ function cardPurchasesTemplate() {
 }
 
 function purchaseHasOpenInstallment(purchase) {
-  const info = installmentInfo(purchase);
-  return info.active && !info.paid;
+  return Boolean(nextPendingInstallment(purchase));
 }
 
 function purchasePaidThisMonth(purchase) {
@@ -2006,13 +2005,15 @@ function purchaseRow(purchase) {
   const status = allInstallmentsPaid(purchase) ? "Quitada" : info.paid ? "Parcela do mês paga" : "Parcela pendente";
   return `
     <article class="purchase-row ${info.paid ? "paid" : ""}">
-      <div><strong>${escapeHtml(purchase.name)}</strong><span>${escapeHtml(card?.name || "Cartão")} · ${formatDate(purchase.purchaseDate, true)}</span></div>
-      <b>${info.total}x de ${money(info.value)}</b>
-      <small>Status real: ${status} · Pagas ${paidCount}/${info.total} · Valor da parcela: ${money(info.value)}</small>
-      ${nextPending ? `<small>Próxima parcela pendente: ${nextPending.number}/${info.total} · Vence em ${formatDate(nextPending.dueDate, true)}</small>` : `<small>Próxima parcela pendente: nenhuma</small>`}
-      ${monthlyPayment ? `<small>Parcela paga no mês: ${escapeHtml(monthlyPayment.key)} · ${formatDate(monthlyPayment.paidDate, true)} ${escapeHtml(monthlyPayment.paidTime || "")}</small>` : `<small>Parcela paga no mês: nenhuma</small>`}
+      <div class="purchase-main">
+        <div><strong>${escapeHtml(purchase.name)}</strong><span>${escapeHtml(card?.name || "Cartão")} · ${formatDate(purchase.purchaseDate, true)}</span></div>
+        <b>${money(info.value)}</b>
+      </div>
+      <small>Status: ${status} · Pagas ${paidCount}/${info.total} · Parcela ${info.total}x</small>
+      ${nextPending ? `<small>Próxima pendente: ${nextPending.number}/${info.total} · Vence em ${formatDate(nextPending.dueDate, true)}</small>` : `<small>Próxima pendente: nenhuma</small>`}
+      ${monthlyPayment ? `<small>Paga no mês: ${formatDate(monthlyPayment.paidDate, true)} ${escapeHtml(monthlyPayment.paidTime || "")}</small>` : ""}
       <div class="row-actions">
-        ${info.active && !info.paid ? `<button type="button" data-pay-installment="${purchase.id}">Marcar parcela como paga</button>` : ""}
+        ${nextPending ? `<button type="button" data-pay-installment="${purchase.id}" data-installment-key="${nextPending.key}">Marcar parcela como paga</button>` : ""}
         <button type="button" data-view-installments="${purchase.id}">Ver parcelas</button>
         <button type="button" data-edit-purchase="${purchase.id}">Editar</button>
         <button type="button" class="danger" data-delete-purchase="${purchase.id}">Excluir</button>
@@ -3513,8 +3514,9 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
   if (!purchase) return showToast("Não foi possível concluir a operação.");
   const info = installmentInfo(purchase);
-  const key = installmentKey || info.key;
-  if (!installmentKey && (!info.active || info.paid)) return showToast("Não foi possível concluir a operação.");
+  const pending = nextPendingInstallment(purchase);
+  const key = installmentKey || pending?.key || info.key;
+  if (!installmentKey && !pending) return showToast("Não foi possível concluir a operação.");
   if ((purchase.paidInstallments || []).includes(key)) return showToast("Não foi possível concluir a operação.");
   purchase.paidInstallments ||= [];
   purchase.installmentPayments ||= {};
