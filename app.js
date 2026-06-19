@@ -3,7 +3,7 @@ const LOCAL_DB_KEY = "minhas-financas-local-db";
 const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.27";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.28";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1212,10 +1212,10 @@ function shellTemplate() {
   const user = currentUser();
   return `
     <section class="app-shell">
-      <header class="topbar">
+      ${currentView === "home" ? `<header class="topbar">
         <div><span class="eyebrow">${greeting()}</span><h1 class="hello">${escapeHtml(user.name.split(" ")[0])}</h1></div>
         <button class="avatar" data-view="profile">${initials(user.name)}</button>
-      </header>
+      </header>` : ""}
       ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
       ${user.role === "user" ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
@@ -1318,7 +1318,6 @@ function homeTemplate() {
     </div>
     <div class="master-actions">
       <button class="primary-button" data-view="graphDashboard">Dashboard</button>
-      <button class="secondary-button" data-view="balanceAudit">Auditoria do Saldo</button>
     </div>`;
 }
 
