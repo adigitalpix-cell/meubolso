@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.35";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.36";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1829,7 +1829,7 @@ function transactionsTemplate() {
   const total = totals();
   const filtered = userTransactions()
     .filter(item => transactionFilter === "all" || item.type === transactionFilter)
-    .sort((a, b) => `${b.paidDate || b.dueDate || ""} ${b.paidTime || ""}`.localeCompare(`${a.paidDate || a.dueDate || ""} ${a.paidTime || ""}`));
+    .sort((a, b) => transactionSortValue(b).localeCompare(transactionSortValue(a)));
   return `
     <div class="page-title"><span class="eyebrow">Seu histórico</span><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></div>
     <div class="summary-grid">
@@ -1840,6 +1840,14 @@ function transactionsTemplate() {
       ${filterButton("all", "Todas")}${filterButton("income", "Receitas")}${filterButton("expense", "Despesas")}
     </div>
     <div class="transaction-list">${transactionRows(filtered, false, true)}</div>`;
+}
+
+function transactionSortValue(item) {
+  const createdDate = item.createdAt?.slice(0, 10) || "";
+  const createdTime = item.createdAt?.slice(11, 19) || "";
+  const date = isPaidStatus(item) ? (item.paidDate || createdDate || item.dueDate || "") : (createdDate || item.dueDate || "");
+  const time = isPaidStatus(item) ? (item.paidTime || createdTime || "") : createdTime;
+  return `${date} ${time}`;
 }
 
 function filterButton(value, label) {
@@ -2561,7 +2569,6 @@ function bindAppEvents() {
   });
   document.querySelector("[data-check-updates]")?.addEventListener("click", checkAppUpdates);
   document.querySelector("[data-smart-install]")?.addEventListener("click", handleSmartInstall);
-  document.querySelector("[data-test-notification]")?.addEventListener("click", testNotification);
   document.querySelector("#user-form")?.addEventListener("submit", saveUser);
   document.querySelector("[data-new-user]")?.addEventListener("click", () => {
     editingUserId = null;
@@ -2714,7 +2721,7 @@ function notificationBlockedNotice() {
 }
 
 function profileVersionActionsTemplate() {
-  const actions = `${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}${smartInstallButtonTemplate()}${!isMaster() ? `<button type="button" data-test-notification>Testar Notificação</button>` : ""}`;
+  const actions = `${isMaster() ? `<button type="button" data-check-updates>Atualizar App</button>` : ""}${smartInstallButtonTemplate()}`;
   return actions ? `<div class="app-version-actions">${actions}</div>` : "";
 }
 
@@ -3093,12 +3100,14 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     db.transactions[session][index] = { ...db.transactions[session][index], ...values };
     savedItem = db.transactions[session][index];
   } else {
-    savedItem = { id: crypto.randomUUID(), ...values };
+    savedItem = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...values };
     db.transactions[session].unshift(savedItem);
   }
   try {
     await saveTransactionToSupabase(savedItem, previousType);
     await refreshUserFinancialData();
+    const refreshedItem = (db.transactions[session] || []).find(item => item.id === savedItem.id);
+    if (refreshedItem && savedItem.createdAt) refreshedItem.createdAt = savedItem.createdAt;
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
