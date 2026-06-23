@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.36";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.37";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -572,7 +572,8 @@ function fromSupabaseRows(rows) {
     account: row.tipo_conta,
     paymentMethod: row.forma_pagamento || "",
     paidDate: row.data_pagamento || "",
-    paidTime: trimTime(row.hora_pagamento)
+    paidTime: trimTime(row.hora_pagamento),
+    createdAt: row.created_at || row.data_cadastro || row.criado_em || ""
   }));
   rows.despesas.forEach(row => pushForUser(data.transactions, row.usuario_id, {
     id: row.id,
@@ -589,7 +590,8 @@ function fromSupabaseRows(rows) {
     account: row.tipo_conta,
     paymentMethod: row.forma_pagamento || "",
     paidDate: row.data_pagamento || "",
-    paidTime: trimTime(row.hora_pagamento)
+    paidTime: trimTime(row.hora_pagamento),
+    createdAt: row.created_at || row.data_cadastro || row.criado_em || ""
   }));
   rows.cartoes.forEach(row => pushForUser(data.cards, row.usuario_id, {
     id: row.id,
@@ -1829,7 +1831,7 @@ function transactionsTemplate() {
   const total = totals();
   const filtered = userTransactions()
     .filter(item => transactionFilter === "all" || item.type === transactionFilter)
-    .sort((a, b) => transactionSortValue(b).localeCompare(transactionSortValue(a)));
+    .sort(compareTransactionsNewestFirst);
   return `
     <div class="page-title"><span class="eyebrow">Seu histórico</span><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></div>
     <div class="summary-grid">
@@ -1848,6 +1850,20 @@ function transactionSortValue(item) {
   const date = isPaidStatus(item) ? (item.paidDate || createdDate || item.dueDate || "") : (createdDate || item.dueDate || "");
   const time = isPaidStatus(item) ? (item.paidTime || createdTime || "") : createdTime;
   return `${date} ${time}`;
+}
+
+function transactionSortTimestamp(item) {
+  const value = transactionSortValue(item).trim();
+  if (!value) return 0;
+  const [date, time = "00:00:00"] = value.split(" ");
+  const timestamp = new Date(`${date}T${time || "00:00:00"}`).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function compareTransactionsNewestFirst(a, b) {
+  const diff = transactionSortTimestamp(b) - transactionSortTimestamp(a);
+  if (diff !== 0) return diff;
+  return String(b.createdAt || b.id || "").localeCompare(String(a.createdAt || a.id || ""));
 }
 
 function filterButton(value, label) {
