@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.37";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.38";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1445,7 +1445,9 @@ function financialDashboard() {
   const receivedMonth = receivedItemsMonth.reduce((sum, item) => sum + item.amount, 0);
   const toReceiveMonth = pendingItemsMonth.filter(item => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
   const paidMonth = paidItemsMonth.reduce((sum, item) => sum + item.amount, 0);
-  const toPayMonth = pendingItemsMonth.filter(item => item.type !== "income").reduce((sum, item) => sum + item.amount, 0);
+  const toPayMonth = pendingItemsMonth
+    .filter(item => item.type === "expense" && item.repeat === "fixed")
+    .reduce((sum, item) => sum + item.amount, 0);
   const balance = receivedMonth - paidMonth;
   const today = dateOffset();
   const seven = dateOffset(7);
