@@ -102,12 +102,16 @@ button { cursor: pointer; }
 .secondary-button { width: 100%; min-height: 48px; border: 1px solid #cfd8d3; border-radius: 14px; color: var(--green); background: white; font-weight: 800; }
 
 .app-shell { min-height: 100vh; padding-bottom: 92px; }
-.topbar { padding: 25px 22px 16px; display: flex; align-items: center; justify-content: space-between; }
+.topbar { padding: 25px 22px 16px; display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 11px; }
+.topbar-greeting { min-width: 0; }
 .hello { margin: 2px 0 0; font-size: 23px; letter-spacing: -.6px; }
 .avatar {
-  width: 43px; height: 43px; border: 0; border-radius: 50%;
+  width: 44px; height: 44px; border: 0; border-radius: 50%;
   color: white; background: var(--green-dark); font-weight: 800;
 }
+.notification-bell { position: relative; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--green-dark); background: white; }
+.notification-bell svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.notification-bell > span { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border: 2px solid var(--paper); border-radius: 99px; color: white; background: var(--red); font-size: 8px; font-weight: 900; }
 .page { padding: 0 18px; }
 .balance-card {
   position: relative;
@@ -359,6 +363,19 @@ button { cursor: pointer; }
 .app-version-actions button:only-child { grid-column: 1 / -1; }
 .app-version-actions .install-app-button { color: white; background: var(--green); }
 .notification-warning { margin-top: 10px; padding: 9px 10px; border-radius: 12px; color: #8a5a11 !important; background: #fff2d8; line-height: 1.35; }
+.notifications-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.notifications-header .page-title { min-width: 0; }
+.notifications-header > button { flex: 0 0 auto; max-width: 108px; padding: 8px 9px; border: 0; border-radius: 10px; color: var(--green); background: var(--green-soft); font-size: 9px; font-weight: 900; line-height: 1.25; }
+.notification-center-list { display: grid; gap: 10px; }
+.notification-center-item { position: relative; width: 100%; padding: 16px; display: block; border: 1px solid var(--line); border-radius: 17px; color: var(--ink); background: white; text-align: left; }
+.notification-center-item.new { border-color: #b8d9cc; background: #f5fbf8; box-shadow: 0 8px 22px rgba(22,107,80,.08); }
+.notification-center-item.read { opacity: .72; }
+.notification-center-item strong, .notification-center-item p, .notification-center-item small { display: block; }
+.notification-center-item strong { padding-right: 42px; font-size: 13px; }
+.notification-center-item p { margin: 7px 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.notification-center-item small { color: #7d8984; font-size: 9px; font-weight: 700; }
+.notification-state { position: absolute; top: 13px; right: 13px; padding: 4px 7px; border-radius: 99px; color: var(--green); background: var(--green-soft); font-size: 8px; font-weight: 900; }
+.notification-center-item.read .notification-state { color: var(--muted); background: #edf0ed; }
 .activity-list { display: grid; gap: 10px; }
 .activity-row { padding: 14px; border-radius: 16px; background: white; border: 1px solid var(--line); }
 .activity-row strong, .activity-row span { display: block; }

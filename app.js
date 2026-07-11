@@ -4,8 +4,9 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
+const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.43";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.44";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1209,8 +1210,8 @@ function render() {
 }
 
 function canAccessView(view) {
-  if (isMaster()) return ["home", "users", "reports", "support", "profile", "security", "masterDashboard", "graphDashboard"].includes(view);
-  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "profileFinancialDashboard", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
+  if (isMaster()) return ["home", "users", "reports", "support", "profile", "notifications", "security", "masterDashboard", "graphDashboard"].includes(view);
+  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "notifications", "profileFinancialDashboard", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
 }
 
 function loginTemplate(message = "") {
@@ -1257,11 +1258,16 @@ function registerTemplate() {
 
 function shellTemplate() {
   const user = currentUser();
+  const unreadNotifications = notificationCenterItems().filter(item => !item.readAt).length;
   return `
     <section class="app-shell">
       ${currentView === "home" ? `<header class="topbar">
-        <div><span class="eyebrow">${greeting()}</span><h1 class="hello">${escapeHtml(user.name.split(" ")[0])}</h1></div>
         <button class="avatar" data-view="profile">${initials(user.name)}</button>
+        <div class="topbar-greeting"><span class="eyebrow">${greeting()}</span><h1 class="hello">${escapeHtml(user.name.split(" ")[0])}</h1></div>
+        <button class="notification-bell" data-view="notifications" aria-label="Abrir notificações">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.5 21h5"/></svg>
+          ${unreadNotifications ? `<span>${unreadNotifications > 9 ? "9+" : unreadNotifications}</span>` : ""}
+        </button>
       </header>` : ""}
       ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
@@ -1293,6 +1299,7 @@ function viewTemplate() {
   if (currentView === "masterDashboard" && isMaster()) return masterDashboardTemplate();
   if (currentView === "support") return supportTemplate();
   if (currentView === "profile") return profileTemplate();
+  if (currentView === "notifications") return notificationsTemplate();
   if (currentView === "activityLog" && !isMaster()) return activityLogTemplate();
   if (currentView === "security") return securityTemplate();
   if (currentView === "users" && isMaster()) return usersTemplate();
@@ -1378,6 +1385,123 @@ function profileFinancialDashboardTemplate() {
     ${monthSituationTemplate(dashboard, monthNet)}
     ${cardsOverviewTemplate(cardLimit, cardUsed, dashboard.availableLimit, cardUsage)}
     ${categoryOverviewTemplate()}`;
+}
+
+function notificationCenterStorageKey() {
+  return `${NOTIFICATION_CENTER_KEY}:${session || "guest"}`;
+}
+
+function notificationCenterState() {
+  try {
+    return JSON.parse(localStorage.getItem(notificationCenterStorageKey()) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveNotificationCenterState(state) {
+  localStorage.setItem(notificationCenterStorageKey(), JSON.stringify(state));
+}
+
+function notificationCenterSources() {
+  if (!session || isMaster()) return [];
+  const today = dateOffset();
+  const items = userTransactions()
+    .filter(item => ["income", "expense"].includes(item.type) && !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
+    .map(item => {
+      const kind = item.type === "income" ? "Receita" : "Despesa";
+      const todayDue = item.dueDate === today;
+      return {
+        id: `movement:${item.type}:${item.id}:${item.dueDate}`,
+        title: `${kind} ${todayDue ? "vence hoje" : "vencida"}`,
+        message: `${item.name} ${todayDue ? "vence hoje" : "está vencida"}. Valor: ${money(item.amount)}`,
+        date: item.dueDate,
+        time: item.createdAt?.slice(11, 16) || "08:00",
+        view: "transactions"
+      };
+    });
+
+  const installments = cardInstallmentItems()
+    .filter(item => !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
+    .map(item => {
+      const todayDue = item.dueDate === today;
+      return {
+        id: `installment:${item.sourcePurchaseId}:${item.sourceInstallment}`,
+        title: `Parcela de cartão ${todayDue ? "vence hoje" : "vencida"}`,
+        message: `${item.name} no cartão ${item.cardName || "Cartão"}. Valor: ${money(item.amount)}`,
+        date: item.dueDate,
+        time: "08:00",
+        view: "card"
+      };
+    });
+
+  const now = new Date(`${today}T12:00:00`);
+  const invoices = userCards().flatMap(card => {
+    const due = new Date(now.getFullYear(), now.getMonth(), Math.min(Number(card.dueDay || 1), daysInMonth(now.getFullYear(), now.getMonth())), 12);
+    const dueDate = localDateKey(due);
+    const amount = currentInvoice(card.id);
+    if (!amount || dueDate > today) return [];
+    const todayDue = dueDate === today;
+    return [{
+      id: `invoice:${card.id}:${dueDate}`,
+      title: `Fatura ${todayDue ? "vence hoje" : "vencida"}`,
+      message: `A fatura do cartão ${card.name} ${todayDue ? "vence hoje" : "está vencida"}. Valor: ${money(amount)}`,
+      date: dueDate,
+      time: "08:00",
+      view: "card"
+    }];
+  });
+
+  const user = currentUser();
+  const accessDays = user ? daysUntilExpiry(user) : 99;
+  const access = user && accessDays >= 0 && accessDays <= 7 ? [{
+    id: `access:${user.id}:${user.accessExpiresAt}`,
+    title: "Acesso próximo do vencimento",
+    message: `Seu acesso vence ${accessDays === 0 ? "hoje" : `em ${accessDays} dia${accessDays === 1 ? "" : "s"}`}.`,
+    date: user.accessExpiresAt,
+    time: "08:00",
+    view: "profile"
+  }] : [];
+  return [...items, ...invoices, ...installments, ...access];
+}
+
+function notificationCenterItems(now = Date.now()) {
+  const state = notificationCenterState();
+  return notificationCenterSources()
+    .map(item => ({ ...item, readAt: state[item.id]?.readAt || "" }))
+    .filter(item => !item.readAt || now - new Date(item.readAt).getTime() < 86400000)
+    .sort((a, b) => Number(Boolean(a.readAt)) - Number(Boolean(b.readAt)) || `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
+}
+
+function markNotificationRead(id) {
+  const state = notificationCenterState();
+  state[id] = { readAt: state[id]?.readAt || new Date().toISOString() };
+  saveNotificationCenterState(state);
+}
+
+function markAllNotificationsRead() {
+  const state = notificationCenterState();
+  const readAt = new Date().toISOString();
+  notificationCenterSources().forEach(item => { state[item.id] ||= { readAt }; });
+  saveNotificationCenterState(state);
+}
+
+function notificationsTemplate() {
+  const items = notificationCenterItems();
+  return `
+    <div class="notifications-header"><div class="page-title"><span class="eyebrow">Sua central</span><h1>Notificações</h1><p>Avisos importantes sobre seus vencimentos.</p></div>${items.some(item => !item.readAt) ? `<button data-read-all>Marcar todas como lidas</button>` : ""}</div>
+    <button class="secondary-button back-button" data-view="home">Voltar ao início</button>
+    <div class="notification-center-list">${items.length ? items.map(notificationCenterRow).join("") : `<div class="empty">Você não possui notificações no momento.</div>`}</div>`;
+}
+
+function notificationCenterRow(item) {
+  return `
+    <button class="notification-center-item ${item.readAt ? "read" : "new"}" data-notification-id="${escapeAttribute(item.id)}" data-notification-view="${item.view}">
+      <span class="notification-state">${item.readAt ? "Lida" : "Nova"}</span>
+      <strong>${escapeHtml(item.title)}</strong>
+      <p>${escapeHtml(item.message)}</p>
+      <small>${formatDate(item.date, true)} — ${escapeHtml(item.time)}</small>
+    </button>`;
 }
 
 function monthSituationTemplate(dashboard, monthNet) {
@@ -2681,6 +2805,15 @@ function bindAppEvents() {
     transactionFilter = button.dataset.filter;
     render();
   }));
+  document.querySelectorAll("[data-notification-id]").forEach(button => button.addEventListener("click", () => {
+    markNotificationRead(button.dataset.notificationId);
+    currentView = button.dataset.notificationView;
+    render();
+  }));
+  document.querySelector("[data-read-all]")?.addEventListener("click", () => {
+    markAllNotificationsRead();
+    render();
+  });
   document.querySelector("[data-transaction-search]")?.addEventListener("input", event => {
     transactionSearch = event.currentTarget.value;
     const results = document.querySelector("[data-transaction-results]");
