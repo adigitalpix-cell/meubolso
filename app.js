@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.39";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.40";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1346,7 +1346,7 @@ function homeTemplate() {
       <small>Saldo atual</small>
       <h2>${money(dashboard.balance)}</h2>
       <div class="balance-meta">
-        <div><span>Receitas do mês</span><strong class="positive">+ ${money(dashboard.monthIncome)}</strong></div>
+        <div><span>Receitas do mês</span><strong class="positive">+ ${money(dashboard.receivedMonth)}</strong></div>
         <div><span>Despesas do mês</span><strong class="negative">- ${money(dashboard.monthExpense)}</strong></div>
       </div>
     </article>
