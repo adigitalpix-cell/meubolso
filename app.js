@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.42";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.43";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1210,7 +1210,7 @@ function render() {
 
 function canAccessView(view) {
   if (isMaster()) return ["home", "users", "reports", "support", "profile", "security", "masterDashboard", "graphDashboard"].includes(view);
-  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
+  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "profileFinancialDashboard", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
 }
 
 function loginTemplate(message = "") {
@@ -1285,6 +1285,7 @@ function viewTemplate() {
   if (currentView === "cardPurchases" && !isMaster()) return cardPurchasesTemplate();
   if (currentView === "purchaseEditor" && !isMaster()) return purchaseEditorTemplate();
   if (currentView === "installments" && !isMaster()) return installmentsTemplate();
+  if (currentView === "profileFinancialDashboard" && !isMaster()) return profileFinancialDashboardTemplate();
   if (currentView === "financialDashboard" && !isMaster()) return financialDashboardTemplate();
   if (currentView === "graphDashboard") return graphDashboardTemplate();
   if (currentView === "dashboardDetail" && !isMaster()) return dashboardDetailTemplate(dashboardDetail);
@@ -1341,37 +1342,42 @@ function homeTemplate() {
       <div class="dashboard-note"><b>Administração centralizada</b><span>Os números são atualizados automaticamente conforme os acessos são alterados.</span></div>`;
   }
   const dashboard = financialDashboard();
+  return `
+    ${expiryNotice()}
+    <article class="balance-card premium-balance-card">
+      <div class="premium-balance-heading"><small>Saldo atual</small></div>
+      <h2>${money(dashboard.balance)}</h2>
+      <div class="balance-meta premium-balance-meta">
+        <div><span>Receitas do mês</span><strong>+ ${money(dashboard.receivedMonth)}</strong></div>
+        <div><span>Despesas do mês</span><strong>- ${money(dashboard.monthExpense)}</strong></div>
+      </div>
+    </article>
+    <div class="dashboard-grid">
+      ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
+      ${dashboardShortcut("cards", "Limite disponível", money(dashboard.availableLimit))}
+      ${dashboardShortcut("today", "Vence hoje", dashboard.dueToday)}
+      ${dashboardShortcut("soon", "Próximos 7 dias", dashboard.dueSoon)}
+      ${dashboardShortcut("overdue", "Em atraso", dashboard.overdue, "danger-card")}
+      ${dashboardShortcut("overdueValue", "Valor em atraso", money(dashboard.overdueAmount), "danger-card")}
+      ${dashboardShortcut("received", "Recebido no mês", money(dashboard.receivedMonth))}
+      ${dashboardShortcut("toReceive", "A receber no mês", money(dashboard.toReceiveMonth))}
+      ${dashboardShortcut("paid", "Pago no mês", money(dashboard.paidMonth))}
+      ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
+    </div>`;
+}
+
+function profileFinancialDashboardTemplate() {
+  const dashboard = financialDashboard();
   const monthNet = dashboard.receivedMonth - dashboard.monthExpense;
   const cardLimit = totalCardLimit();
   const cardUsed = pendingPurchaseTotal();
   const cardUsage = cardLimit ? Math.min(cardUsed / cardLimit * 100, 100) : 0;
   return `
-    ${expiryNotice()}
-    <article class="balance-card premium-balance-card">
-      <div class="premium-balance-heading"><small>Saldo atual</small><span>Visão do mês</span></div>
-      <h2>${money(dashboard.balance)}</h2>
-      <div class="balance-meta premium-balance-meta">
-        <div><span>Receitas do mês</span><strong>+ ${money(dashboard.receivedMonth)}</strong></div>
-        <div><span>Despesas do mês</span><strong>- ${money(dashboard.monthExpense)}</strong></div>
-        <div><span>Recebido no mês</span><strong class="positive">${money(dashboard.receivedMonth)}</strong></div>
-        <div><span>Pago no mês</span><strong class="negative">${money(dashboard.paidMonth)}</strong></div>
-      </div>
-    </article>
+    <div class="page-title"><span class="eyebrow">Análise financeira</span><h1>Dashboard Financeiro</h1><p>Acompanhe a situação do mês, cartões e categorias.</p></div>
+    <button class="secondary-button back-button" data-view="profile">Voltar ao perfil</button>
     ${monthSituationTemplate(dashboard, monthNet)}
     ${cardsOverviewTemplate(cardLimit, cardUsed, dashboard.availableLimit, cardUsage)}
-    ${categoryOverviewTemplate()}
-    <div class="dashboard-grid">
-      ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
-      ${dashboardShortcut("today", "Vence hoje", dashboard.dueToday)}
-      ${dashboardShortcut("soon", "Próximos 7 dias", dashboard.dueSoon)}
-      ${dashboardShortcut("overdue", "Em atraso", dashboard.overdue, "danger-card")}
-      ${dashboardShortcut("overdueValue", "Valor em atraso", money(dashboard.overdueAmount), "danger-card")}
-      ${dashboardShortcut("toReceive", "A receber no mês", money(dashboard.toReceiveMonth))}
-      ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
-    </div>
-    <div class="master-actions">
-      <button class="primary-button" data-view="graphDashboard">Dashboard</button>
-    </div>`;
+    ${categoryOverviewTemplate()}`;
 }
 
 function monthSituationTemplate(dashboard, monthNet) {
@@ -2230,6 +2236,7 @@ function profileTemplate() {
     </article>
     <div class="menu-list">
       ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
+      ${!isMaster() ? `<button class="menu-item" data-view="profileFinancialDashboard"><span>Dashboard Financeiro</span><b>›</b></button>` : ""}
       ${!isMaster() ? `<button class="menu-item" data-view="activityLog"><span>Histórico de atividades</span><b>›</b></button>` : ""}
       <button class="menu-item" data-view="support"><span>${isMaster() ? "Menu Suporte" : "Falar com o Suporte"}</span><b>›</b></button>
       <button class="menu-item" data-view="security"><span>Segurança</span><b>›</b></button>
