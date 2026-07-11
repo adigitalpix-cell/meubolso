@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.41";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.42";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1341,31 +1341,103 @@ function homeTemplate() {
       <div class="dashboard-note"><b>Administração centralizada</b><span>Os números são atualizados automaticamente conforme os acessos são alterados.</span></div>`;
   }
   const dashboard = financialDashboard();
+  const monthNet = dashboard.receivedMonth - dashboard.monthExpense;
+  const cardLimit = totalCardLimit();
+  const cardUsed = pendingPurchaseTotal();
+  const cardUsage = cardLimit ? Math.min(cardUsed / cardLimit * 100, 100) : 0;
   return `
     ${expiryNotice()}
-    <article class="balance-card">
-      <small>Saldo atual</small>
+    <article class="balance-card premium-balance-card">
+      <div class="premium-balance-heading"><small>Saldo atual</small><span>Visão do mês</span></div>
       <h2>${money(dashboard.balance)}</h2>
-      <div class="balance-meta">
-        <div><span>Receitas do mês</span><strong class="positive">+ ${money(dashboard.receivedMonth)}</strong></div>
-        <div><span>Despesas do mês</span><strong class="negative">- ${money(dashboard.monthExpense)}</strong></div>
+      <div class="balance-meta premium-balance-meta">
+        <div><span>Receitas do mês</span><strong>+ ${money(dashboard.receivedMonth)}</strong></div>
+        <div><span>Despesas do mês</span><strong>- ${money(dashboard.monthExpense)}</strong></div>
+        <div><span>Recebido no mês</span><strong class="positive">${money(dashboard.receivedMonth)}</strong></div>
+        <div><span>Pago no mês</span><strong class="negative">${money(dashboard.paidMonth)}</strong></div>
       </div>
     </article>
+    ${monthSituationTemplate(dashboard, monthNet)}
+    ${cardsOverviewTemplate(cardLimit, cardUsed, dashboard.availableLimit, cardUsage)}
+    ${categoryOverviewTemplate()}
     <div class="dashboard-grid">
       ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
-      ${dashboardShortcut("cards", "Limite disponível", money(dashboard.availableLimit))}
       ${dashboardShortcut("today", "Vence hoje", dashboard.dueToday)}
       ${dashboardShortcut("soon", "Próximos 7 dias", dashboard.dueSoon)}
       ${dashboardShortcut("overdue", "Em atraso", dashboard.overdue, "danger-card")}
       ${dashboardShortcut("overdueValue", "Valor em atraso", money(dashboard.overdueAmount), "danger-card")}
-      ${dashboardShortcut("received", "Recebido no mês", money(dashboard.receivedMonth))}
       ${dashboardShortcut("toReceive", "A receber no mês", money(dashboard.toReceiveMonth))}
-      ${dashboardShortcut("paid", "Pago no mês", money(dashboard.paidMonth))}
       ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
     </div>
     <div class="master-actions">
       <button class="primary-button" data-view="graphDashboard">Dashboard</button>
     </div>`;
+}
+
+function monthSituationTemplate(dashboard, monthNet) {
+  const totalMovement = dashboard.receivedMonth + dashboard.monthExpense;
+  const incomeWidth = totalMovement ? dashboard.receivedMonth / totalMovement * 100 : 0;
+  const expenseWidth = totalMovement ? dashboard.monthExpense / totalMovement * 100 : 0;
+  return `
+    <section class="home-dashboard-section month-situation-card">
+      <div class="home-section-heading"><div><span>Visão mensal</span><h2>Situação financeira do mês</h2></div><b class="${monthNet >= 0 ? "positive" : "negative"}">${monthNet >= 0 ? "+" : ""}${money(monthNet)}</b></div>
+      <div class="month-situation-values">
+        <div><span>Receitas do mês</span><strong>${money(dashboard.receivedMonth)}</strong></div>
+        <div><span>Despesas do mês</span><strong>${money(dashboard.monthExpense)}</strong></div>
+        <div><span>Saldo líquido</span><strong>${money(monthNet)}</strong></div>
+      </div>
+      <div class="month-flow-bar" aria-label="Comparação entre receitas e despesas"><i style="width:${incomeWidth}%"></i><b style="width:${expenseWidth}%"></b></div>
+      <div class="month-flow-legend"><span><i></i>Receitas</span><span><i></i>Despesas</span></div>
+    </section>`;
+}
+
+function cardsOverviewTemplate(limit, used, available, usage) {
+  return `
+    <button class="home-dashboard-section cards-overview-card" data-view="card">
+      <div class="home-section-heading"><div><span>Cartões</span><h2>Uso dos cartões</h2></div><b>${Math.round(usage)}%</b></div>
+      <div class="cards-overview-values">
+        <div><span>Limite total</span><strong>${money(limit)}</strong></div>
+        <div><span>Utilizado</span><strong>${money(used)}</strong></div>
+        <div><span>Disponível</span><strong>${money(available)}</strong></div>
+      </div>
+      <div class="cards-usage-bar"><i style="width:${usage}%"></i></div>
+      <small>${limit ? "Toque para abrir seus cartões" : "Nenhum cartão cadastrado · toque para adicionar"}</small>
+    </button>`;
+}
+
+function homeMonthExpenseItems() {
+  const current = monthKey();
+  const items = dashboardTransactions();
+  const paid = items.filter(item => item.type !== "income" && isPaidStatus(item) && paidMonthKey(item) === current);
+  const pending = items.filter(item => item.type !== "income" && !isPaidStatus(item) && dueMonthKey(item) === current);
+  return [...paid, ...pending];
+}
+
+function homeCategoryTotals() {
+  const totals = new Map();
+  homeMonthExpenseItems().forEach(item => {
+    const category = item.category || "Outros";
+    totals.set(category, (totals.get(category) || 0) + Number(item.amount || 0));
+  });
+  const sorted = [...totals].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  if (sorted.length <= 6) return sorted;
+  const visible = sorted.slice(0, 5);
+  visible.push({ label: "Outros", value: sorted.slice(5).reduce((sum, item) => sum + item.value, 0) });
+  return visible;
+}
+
+function categoryOverviewTemplate() {
+  const categories = homeCategoryTotals();
+  const total = categories.reduce((sum, item) => sum + item.value, 0);
+  const rows = categories.map(item => {
+    const percentage = total ? item.value / total * 100 : 0;
+    return `<div class="category-overview-row"><div><strong>${escapeHtml(item.label)}</strong><span>${money(item.value)} · ${Math.round(percentage)}%</span></div><i><b style="width:${percentage}%"></b></i></div>`;
+  }).join("");
+  return `
+    <section class="home-dashboard-section category-overview-card">
+      <div class="home-section-heading"><div><span>Despesas</span><h2>Despesas por categoria</h2></div></div>
+      <div class="category-overview-list">${rows || `<div class="home-empty-state"><b>Nenhuma despesa neste mês</b><span>As categorias aparecerão aqui automaticamente.</span></div>`}</div>
+    </section>`;
 }
 
 function dashboardShortcut(detail, label, value, className = "") {
