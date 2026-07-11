@@ -158,11 +158,15 @@ button { cursor: pointer; }
 
 .bottom-nav {
   position: fixed; z-index: 20; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 100%; max-width: 480px; height: 76px; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  width: 100%; max-width: 480px; height: 76px; display: grid;
   border-top: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(14px);
 }
-.nav-button { border: 0; background: transparent; color: #8c9692; font-size: 10px; font-weight: 700; }
-.nav-button b { display: block; margin-bottom: 4px; font-size: 21px; line-height: 1; }
+.bottom-nav.user-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bottom-nav.master-nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.nav-button { min-width: 0; border: 0; background: transparent; color: #8c9692; font-size: 10px; font-weight: 700; }
+.nav-button b { width: 24px; height: 24px; margin: 0 auto 4px; display: grid; place-items: center; font-size: 21px; line-height: 1; }
+.nav-button svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.nav-button span { display: block; }
 .nav-button.active { color: var(--green); }
 .fab {
   position: fixed; z-index: 25; left: 50%; bottom: 55px; transform: translateX(-50%);

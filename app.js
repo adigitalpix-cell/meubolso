@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.38";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.39";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1265,18 +1265,17 @@ function shellTemplate() {
       ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
       ${user.role === "user" ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
-      <nav class="bottom-nav">
-        ${navButton("home", "⌂", "Início")}
-        ${user.role === "master" ? navButton("users", "♙", "Usuários") : navButton("transactions", "↕", "Transações")}
-        ${user.role === "master" ? navButton("reports", "▤", "Relatórios") : navButton("card", "▰", "Cartões")}
+      <nav class="bottom-nav ${user.role === "master" ? "master-nav" : "user-nav"}">
+        ${navButton("home", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8v9.7a.5.5 0 0 1-.5.5H15v-6H9v6H3.5a.5.5 0 0 1-.5-.5z"/></svg>`, "Início")}
+        ${user.role === "master" ? navButton("users", "♙", "Usuários") : navButton("transactions", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v15m0 0-4-4m4 4 4-4M17 21V6m0 0-4 4m4-4 4 4"/></svg>`, "Transações")}
+        ${user.role === "master" ? navButton("reports", "▤", "Relatórios") : navButton("card", `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3 9h18M7 15h4"/></svg>`, "Cartões")}
         ${user.role === "master" ? navButton("support", "?", "Suporte") : ""}
-        ${navButton("profile", "○", "Perfil")}
       </nav>
     </section>`;
 }
 
 function navButton(view, icon, label) {
-  return `<button class="nav-button ${currentView === view ? "active" : ""}" data-view="${view}"><b>${icon}</b>${label}</button>`;
+  return `<button class="nav-button ${currentView === view ? "active" : ""}" data-view="${view}"><b aria-hidden="true">${icon}</b><span>${label}</span></button>`;
 }
 
 function viewTemplate() {
