@@ -5,8 +5,8 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
-const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.47";
+const APP_NAME = "MEU BOLSO";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.48";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -175,7 +175,7 @@ function cacheDatabase() {
   try {
     localStorage.setItem(LOCAL_DB_KEY, JSON.stringify({ db, cachedAt: new Date().toISOString() }));
   } catch (error) {
-    console.warn("[Minhas Finanças][Offline] não foi possível salvar cache local", error);
+    console.warn("[MEU BOLSO][Offline] não foi possível salvar cache local", error);
   }
 }
 
@@ -287,7 +287,7 @@ async function loadScopedDatabase(loggedUser) {
     supabaseSelect("tipos_conta", selectWithFilter(userFilter))
   ]);
   const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
-  if (isLoggedMaster) console.log("[Minhas Finanças][Supabase] SELECT usuarios master", usuarios.length, usuarios);
+  if (isLoggedMaster) console.log("[MEU BOLSO][Supabase] SELECT usuarios master", usuarios.length, usuarios);
   logSupabaseLoad(loggedUser, loaded);
   isOfflineMode = false;
   db = loaded;
@@ -327,7 +327,7 @@ async function refreshUserFinancialData() {
     supabaseSelect("categorias", selectWithFilter(filter)),
     supabaseSelect("tipos_conta", selectWithFilter(filter))
   ]);
-  console.log("[Minhas Finanças][Supabase] SELECT despesas usuario_id", session, despesas.length, despesas);
+  console.log("[MEU BOLSO][Supabase] SELECT despesas usuario_id", session, despesas.length, despesas);
   const loaded = normalizeDatabase(fromSupabaseRows({
     usuarios: [userToSupabaseLike(user)],
     receitas,
@@ -385,11 +385,11 @@ function userToSupabaseLike(user) {
 }
 
 function logSupabaseLoad(user, data) {
-  console.log("[Minhas Finanças][Supabase] usuário logado", user?.username, user?.id);
-  console.log("[Minhas Finanças][Supabase] usuario_id usado", user?.id);
-  console.log("[Minhas Finanças][Supabase] cartões carregados", data.cards?.[user?.id]?.length || 0);
-  console.log("[Minhas Finanças][Supabase] despesas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "expense").length);
-  console.log("[Minhas Finanças][Supabase] receitas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "income").length);
+  console.log("[MEU BOLSO][Supabase] usuário logado", user?.username, user?.id);
+  console.log("[MEU BOLSO][Supabase] usuario_id usado", user?.id);
+  console.log("[MEU BOLSO][Supabase] cartões carregados", data.cards?.[user?.id]?.length || 0);
+  console.log("[MEU BOLSO][Supabase] despesas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "expense").length);
+  console.log("[MEU BOLSO][Supabase] receitas carregadas", (data.transactions?.[user?.id] || []).filter(item => item.type === "income").length);
 }
 
 function saveDatabase() {
@@ -449,7 +449,7 @@ function supabaseAnd(...filters) {
 }
 
 function showDeleteError(error) {
-  console.error("[Minhas Finanças][Supabase] erro ao excluir", error);
+  console.error("[MEU BOLSO][Supabase] erro ao excluir", error);
   if (isOfflineMode || hasOfflineQueue() || isNetworkError(error)) {
     showToast("Exclusão salva offline. Será sincronizada quando a internet voltar.");
     render();
@@ -492,7 +492,7 @@ async function supabaseRequest(table, { method = "GET", query = "", body = null,
   }
   if (!response.ok) {
     const message = await response.text();
-    console.error("[Minhas Finanças][Supabase] erro", table, response.status, message);
+    console.error("[MEU BOLSO][Supabase] erro", table, response.status, message);
     throw new Error(message || `Erro Supabase: ${response.status}`);
   }
   if (response.status === 204) return [];
@@ -533,7 +533,7 @@ async function syncOfflineQueue() {
     }
     showToast("Dados sincronizados com sucesso.");
   } catch (error) {
-    console.error("[Minhas Finanças][Offline] erro ao sincronizar fila", error);
+    console.error("[MEU BOLSO][Offline] erro ao sincronizar fila", error);
     remaining.push(...queue);
     saveOfflineQueue(remaining);
     isOfflineMode = true;
@@ -2926,7 +2926,7 @@ async function registerUser(event) {
   try {
     await refreshCurrentUserData();
   } catch (error) {
-    console.error("[Minhas Finanças][Supabase] erro após cadastro", error);
+    console.error("[MEU BOLSO][Supabase] erro após cadastro", error);
   }
   showToast("Operação realizada com sucesso.");
   render();
@@ -3150,7 +3150,7 @@ async function checkAppUpdates() {
     showToast("Cache atualizado com sucesso.");
     setTimeout(() => window.location.reload(), 700);
   } catch (error) {
-    console.error("[Minhas Finanças][PWA] erro ao verificar atualizações", error);
+    console.error("[MEU BOLSO][PWA] erro ao verificar atualizações", error);
     showToast("Não foi possível concluir a operação.");
   }
 }
@@ -3165,7 +3165,7 @@ async function autoCheckAppUpdates() {
       render();
     }
   } catch (error) {
-    console.warn("[Minhas Finanças][PWA] atualização automática não concluída", error);
+    console.warn("[MEU BOLSO][PWA] atualização automática não concluída", error);
   }
 }
 
@@ -3177,7 +3177,7 @@ async function clearAppCache() {
     showToast("Cache atualizado com sucesso.");
     setTimeout(() => window.location.reload(), 700);
   } catch (error) {
-    console.error("[Minhas Finanças][PWA] erro ao limpar cache", error);
+    console.error("[MEU BOLSO][PWA] erro ao limpar cache", error);
     showToast("Não foi possível concluir a operação.");
   }
 }
@@ -3281,7 +3281,7 @@ async function activateNotifications() {
   }
   if (registration?.showNotification) {
     await registration.showNotification("Notificações ativadas", {
-      body: "Você receberá avisos importantes do Meu Bolso.",
+      body: "Você receberá avisos importantes do MEU BOLSO.",
       icon: "/icon-192.svg",
       badge: "/icon-192.svg",
       tag: "notifications-enabled"
@@ -3314,7 +3314,7 @@ async function testNotification() {
   localStorage.removeItem(NOTIFICATION_BLOCK_NOTICE_KEY);
   const registration = await navigator.serviceWorker.ready.catch(() => null);
   if (registration?.showNotification) {
-    await registration.showNotification("Meu Bolso", {
+    await registration.showNotification("MEU BOLSO", {
       body: "Notificações ativadas com sucesso.",
       icon: "/icon-192.svg",
       badge: "/icon-192.svg",
@@ -3322,7 +3322,7 @@ async function testNotification() {
       data: { url: "/" }
     });
   } else {
-    new Notification("Meu Bolso", {
+    new Notification("MEU BOLSO", {
       body: "Notificações ativadas com sucesso.",
       icon: "/icon-192.svg"
     });
@@ -3399,11 +3399,11 @@ async function showAppNotification(body, tag, url = "/") {
     data: { url }
   };
   if (registration?.showNotification) {
-    await registration.showNotification("Meu Bolso", options);
+    await registration.showNotification("MEU BOLSO", options);
     return true;
   }
   if ("Notification" in window) {
-    new Notification("Meu Bolso", options);
+    new Notification("MEU BOLSO", options);
     return true;
   }
   return false;
@@ -3741,7 +3741,7 @@ function openSupportWhatsapp(ticketId) {
   if (!ticket) return showToast("Não foi possível concluir a operação.");
   const phone = normalizePhone(ticket.whatsapp);
   if (!phone) return showToast("WhatsApp não informado.");
-  const message = `Olá, ${ticket.name}.\n\nRecebi sua solicitação pelo Minhas Finanças.\n\nChamado:\n${ticket.subject}\n\nComo posso ajudar?`;
+  const message = `Olá, ${ticket.name}.\n\nRecebi sua solicitação pelo MEU BOLSO.\n\nChamado:\n${ticket.subject}\n\nComo posso ajudar?`;
   window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(message)}`, "_blank");
 }
 
@@ -3817,7 +3817,7 @@ async function saveUser(event) {
   try {
     await refreshMasterData();
   } catch (error) {
-    console.error("[Minhas Finanças][Supabase] erro ao recarregar usuários master", error);
+    console.error("[MEU BOLSO][Supabase] erro ao recarregar usuários master", error);
   }
   showToast("Operação realizada com sucesso.");
   render();

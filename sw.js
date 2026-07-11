@@ -1,4 +1,4 @@
-const CACHE_NAME = "minhas-financas-v1.0.0.47";
+const CACHE_NAME = "minhas-financas-v1.0.0.48";
 const ASSETS = [
   "/",
   "/index.html",
@@ -47,7 +47,7 @@ self.addEventListener("push", event => {
     data = { body: event.data?.text() || "Você tem uma nova atualização financeira." };
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || "Meu Bolso", {
+    self.registration.showNotification(data.title || "MEU BOLSO", {
       body: data.body || "Você tem uma nova atualização financeira.",
       icon: "/icon-192.svg",
       badge: "/icon-192.svg",

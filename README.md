@@ -1,4 +1,4 @@
-# Minhas Finanças
+# MEU BOLSO
 
 Aplicativo financeiro PWA para controle de usuários, receitas, despesas, cartões, compras parceladas, parcelas e suporte.
 
