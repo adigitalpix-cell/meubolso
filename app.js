@@ -6,7 +6,7 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.46";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.47";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1417,10 +1417,11 @@ function homeTemplate() {
       <div class="premium-balance-heading"><small>Saldo atual</small></div>
       <h2>${money(dashboard.balance)}</h2>
       <div class="balance-meta premium-balance-meta">
-        <div><span>Receitas do mês</span><strong>+ ${money(dashboard.receivedMonth)}</strong></div>
-        <div><span>Despesas do mês</span><strong>- ${money(dashboard.monthExpense)}</strong></div>
+        <div><button class="balance-info-trigger" data-balance-info="income" data-balance-message="Total das receitas que você recebeu durante o mês atual."><span>Receitas do mês</span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.2"/></svg></button><strong>+ ${money(dashboard.receivedMonth)}</strong></div>
+        <div><button class="balance-info-trigger" data-balance-info="expense" data-balance-message="Total das despesas do mês atual, incluindo despesas pagas e despesas ainda a pagar."><span>Despesas do mês</span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.2"/></svg></button><strong>- ${money(dashboard.monthExpense)}</strong></div>
       </div>
     </article>
+    <div class="balance-info-popover" data-balance-popover role="status" hidden></div>
     <div class="dashboard-grid">
       ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
       ${dashboardShortcut("cards", "Limite disponível", money(dashboard.availableLimit))}
@@ -1710,6 +1711,37 @@ function categoryOverviewTemplate() {
 
 function dashboardShortcut(detail, label, value, className = "") {
   return `<button class="dashboard-tile ${className}" data-dashboard-detail="${detail}"><span>${label}</span><strong>${value}</strong></button>`;
+}
+
+function closeBalanceInfoPopover() {
+  const popover = document.querySelector("[data-balance-popover]");
+  if (!popover) return;
+  popover.hidden = true;
+  popover.dataset.owner = "";
+  clearTimeout(closeBalanceInfoPopover.timer);
+}
+
+function toggleBalanceInfoPopover(button) {
+  const popover = document.querySelector("[data-balance-popover]");
+  if (!popover) return;
+  const owner = button.dataset.balanceInfo;
+  if (!popover.hidden && popover.dataset.owner === owner) {
+    closeBalanceInfoPopover();
+    return;
+  }
+  popover.textContent = button.dataset.balanceMessage;
+  popover.dataset.owner = owner;
+  popover.hidden = false;
+  const rect = button.getBoundingClientRect();
+  const cardRect = button.closest(".balance-card")?.getBoundingClientRect() || rect;
+  const width = Math.min(280, window.innerWidth - 24);
+  popover.style.width = `${width}px`;
+  popover.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`;
+  popover.style.top = `${cardRect.bottom + 8}px`;
+  const popoverRect = popover.getBoundingClientRect();
+  if (popoverRect.bottom > window.innerHeight - 12) popover.style.top = `${Math.max(12, cardRect.top - popoverRect.height - 8)}px`;
+  clearTimeout(closeBalanceInfoPopover.timer);
+  closeBalanceInfoPopover.timer = setTimeout(closeBalanceInfoPopover, 4000);
 }
 
 function dashboardDetailTemplate(type) {
@@ -2901,6 +2933,16 @@ async function registerUser(event) {
 }
 
 function bindAppEvents() {
+  document.querySelectorAll("[data-balance-info]").forEach(button => button.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleBalanceInfoPopover(event.currentTarget);
+  }));
+  if (!bindAppEvents.balanceInfoOutsideBound) {
+    document.addEventListener("click", event => {
+      if (!event.target.closest("[data-balance-info], [data-balance-popover]")) closeBalanceInfoPopover();
+    });
+    bindAppEvents.balanceInfoOutsideBound = true;
+  }
   document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => {
     const target = button.dataset.view;
     if (!canAccessView(target)) return showToast("Você não tem permissão para acessar esta área.");
