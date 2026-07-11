@@ -6,7 +6,7 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.44";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.45";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -79,6 +79,7 @@ let editingCardId = null;
 let editingPurchaseId = null;
 let selectedPurchaseId = null;
 let dashboardDetail = null;
+let profileDashboardDetailType = null;
 let renewTargetUserId = null;
 let activeListType = "categories";
 let editingListItem = null;
@@ -1211,7 +1212,7 @@ function render() {
 
 function canAccessView(view) {
   if (isMaster()) return ["home", "users", "reports", "support", "profile", "notifications", "security", "masterDashboard", "graphDashboard"].includes(view);
-  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "notifications", "profileFinancialDashboard", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
+  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "notifications", "profileFinancialDashboard", "profileDashboardDetail", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
 }
 
 function loginTemplate(message = "") {
@@ -1292,6 +1293,7 @@ function viewTemplate() {
   if (currentView === "purchaseEditor" && !isMaster()) return purchaseEditorTemplate();
   if (currentView === "installments" && !isMaster()) return installmentsTemplate();
   if (currentView === "profileFinancialDashboard" && !isMaster()) return profileFinancialDashboardTemplate();
+  if (currentView === "profileDashboardDetail" && !isMaster()) return profileDashboardDetailTemplate();
   if (currentView === "financialDashboard" && !isMaster()) return financialDashboardTemplate();
   if (currentView === "graphDashboard") return graphDashboardTemplate();
   if (currentView === "dashboardDetail" && !isMaster()) return dashboardDetailTemplate(dashboardDetail);
@@ -1512,13 +1514,89 @@ function monthSituationTemplate(dashboard, monthNet) {
     <section class="home-dashboard-section month-situation-card">
       <div class="home-section-heading"><div><span>Visão mensal</span><h2>Situação financeira do mês</h2></div><b class="${monthNet >= 0 ? "positive" : "negative"}">${monthNet >= 0 ? "+" : ""}${money(monthNet)}</b></div>
       <div class="month-situation-values">
-        <div><span>Receitas do mês</span><strong>${money(dashboard.receivedMonth)}</strong></div>
-        <div><span>Despesas do mês</span><strong>${money(dashboard.monthExpense)}</strong></div>
-        <div><span>Saldo líquido</span><strong>${money(monthNet)}</strong></div>
+        <button data-financial-composition="income"><span>Receitas do mês</span><strong>${money(dashboard.receivedMonth)}</strong><small>Ver detalhes</small></button>
+        <button data-financial-composition="expense"><span>Despesas do mês</span><strong>${money(dashboard.monthExpense)}</strong><small>Ver detalhes</small></button>
+        <button data-financial-composition="net"><span>Saldo líquido</span><strong>${money(monthNet)}</strong><small>Ver composição</small></button>
       </div>
       <div class="month-flow-bar" aria-label="Comparação entre receitas e despesas"><i style="width:${incomeWidth}%"></i><b style="width:${expenseWidth}%"></b></div>
       <div class="month-flow-legend"><span><i></i>Receitas</span><span><i></i>Despesas</span></div>
     </section>`;
+}
+
+function dashboardMonthReceivedItems() {
+  const current = monthKey();
+  return dashboardTransactions()
+    .filter(item => item.type === "income" && isPaidStatus(item) && paidMonthKey(item) === current)
+    .sort(compareTransactionsNewestFirst);
+}
+
+function uniqueDashboardItems(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = item.sourcePurchaseId && item.sourceInstallment ? `${item.sourcePurchaseId}:${item.sourceInstallment}` : item.id;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function profileDashboardDetailTemplate() {
+  const dashboard = financialDashboard();
+  const type = ["income", "expense", "net"].includes(profileDashboardDetailType) ? profileDashboardDetailType : "net";
+  const incomeItems = uniqueDashboardItems(dashboardMonthReceivedItems());
+  const expenseItems = uniqueDashboardItems(homeMonthExpenseItems().sort(compareTransactionsNewestFirst));
+  const incomeTotal = incomeItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const expenseTotal = expenseItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const monthNet = dashboard.receivedMonth - dashboard.monthExpense;
+  const title = type === "income" ? "Receitas do mês" : type === "expense" ? "Despesas do mês" : "Saldo líquido";
+  return `
+    <section class="financial-composition-page">
+      <div class="page-title"><span class="eyebrow">Conferência do cálculo</span><h1>${title}</h1><p>Somente lançamentos considerados no mês atual.</p></div>
+      <button class="secondary-button back-button" data-view="profileFinancialDashboard">Voltar ao Dashboard Financeiro</button>
+      ${type === "net" ? financialNetComposition(dashboard.receivedMonth, dashboard.monthExpense, monthNet) : `
+        <div class="financial-composition-list">${(type === "income" ? incomeItems : expenseItems).length
+          ? (type === "income" ? incomeItems : expenseItems).map(item => financialCompositionRow(item, type)).join("")
+          : `<div class="empty">Nenhum lançamento considerado neste cálculo.</div>`}</div>
+        <article class="financial-composition-total"><span>Total considerado</span><strong>${money(type === "income" ? incomeTotal : expenseTotal)}</strong></article>`}
+    </section>`;
+}
+
+function financialCompositionRow(item, type) {
+  const origin = financialItemOrigin(item, type);
+  if (type === "income") {
+    return `
+      <article class="financial-composition-row">
+        <div><strong>${escapeHtml(item.name)}</strong><span>${statusLabel(item)}</span></div>
+        <b class="positive">${money(item.amount)}</b>
+        <p>Recebido em ${formatDate(item.paidDate || item.dueDate, true)}</p>
+        <small>Origem: ${origin}</small>
+      </article>`;
+  }
+  return `
+    <article class="financial-composition-row">
+      <div><strong>${escapeHtml(item.name)}</strong><span>${statusLabel(item)}</span></div>
+      <b class="negative">${money(item.amount)}</b>
+      <p>Vencimento: ${formatDate(item.dueDate, true)}${item.paidDate ? ` · Pago em ${formatDate(item.paidDate, true)}` : ""}</p>
+      <small>Origem: ${origin}</small>
+    </article>`;
+}
+
+function financialItemOrigin(item, type) {
+  if (type === "income") return "Receitas";
+  if (item.source === "card-installment-virtual" || item.source === "card-installment") return "Parcela de cartão";
+  if (item.source === "card-invoice") return "Fatura de cartão";
+  if (item.repeat === "fixed") return "Despesa fixa mensal";
+  return "Despesa normal";
+}
+
+function financialNetComposition(income, expense, net) {
+  return `
+    <article class="financial-net-composition">
+      <div><span>Receitas consideradas</span><strong class="positive">${money(income)}</strong></div>
+      <div><span>(−) Despesas consideradas</span><strong class="negative">${money(expense)}</strong></div>
+      <div class="net-result"><span>(=) Saldo líquido</span><strong>${money(net)}</strong></div>
+      <p>Fórmula usada pelo sistema: Receitas consideradas − Despesas consideradas = Saldo líquido.</p>
+    </article>`;
 }
 
 function cardsOverviewTemplate(limit, used, available, usage) {
@@ -2803,6 +2881,11 @@ function bindAppEvents() {
   }));
   document.querySelectorAll("[data-filter]").forEach(button => button.addEventListener("click", () => {
     transactionFilter = button.dataset.filter;
+    render();
+  }));
+  document.querySelectorAll("[data-financial-composition]").forEach(button => button.addEventListener("click", () => {
+    profileDashboardDetailType = button.dataset.financialComposition;
+    currentView = "profileDashboardDetail";
     render();
   }));
   document.querySelectorAll("[data-notification-id]").forEach(button => button.addEventListener("click", () => {
