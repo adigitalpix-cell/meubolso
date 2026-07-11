@@ -5,7 +5,7 @@ const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.40";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.41";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -59,6 +59,7 @@ let lastSyncError = "";
 let currentView = "home";
 let authView = "login";
 let transactionFilter = "all";
+let transactionSearch = "";
 let editingTransactionId = null;
 let editingUserId = null;
 let userFormOpen = false;
@@ -1829,20 +1830,79 @@ function statusLabel(item) {
 }
 
 function transactionsTemplate() {
-  const total = totals();
-  const filtered = userTransactions()
-    .filter(item => transactionFilter === "all" || item.type === transactionFilter)
-    .sort(compareTransactionsNewestFirst);
+  const filtered = filteredHistoryTransactions();
   return `
     <div class="page-title"><span class="eyebrow">Seu histórico</span><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></div>
-    <div class="summary-grid">
-      <div class="summary-tile"><span>A receber</span><strong class="positive">${money(userTransactions().filter(i => i.type === "income" && !isPaidStatus(i)).reduce((a,b) => a + b.amount, 0))}</strong></div>
-      <div class="summary-tile"><span>A pagar</span><strong class="negative">${money(total.pending)}</strong></div>
-    </div>
     <div class="filters">
       ${filterButton("all", "Todas")}${filterButton("income", "Receitas")}${filterButton("expense", "Despesas")}
     </div>
-    <div class="transaction-list">${transactionRows(filtered, false, true)}</div>`;
+    <label class="transaction-search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>
+      <input type="search" data-transaction-search value="${escapeAttribute(transactionSearch)}" placeholder="Buscar transação..." autocomplete="off">
+    </label>
+    <div class="transaction-list transaction-history-list" data-transaction-results>${transactionHistoryRows(filtered)}</div>`;
+}
+
+function filteredHistoryTransactions() {
+  const search = transactionSearch.trim().toLocaleLowerCase("pt-BR");
+  return userTransactions()
+    .filter(item => transactionFilter === "all" || item.type === transactionFilter)
+    .filter(item => {
+      if (!search) return true;
+      const searchable = [item.name, item.category, item.paymentMethod, item.account, item.cardName, statusLabel(item)]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("pt-BR");
+      return searchable.includes(search);
+    })
+    .sort(compareTransactionsNewestFirst);
+}
+
+function transactionHistoryRows(items) {
+  if (!items.length) return `<div class="empty">Nenhuma movimentação encontrada.</div>`;
+  return items.map(item => `
+    <article class="transaction history-transaction ${item.type}">
+      <div class="transaction-icon">${categoryIconSvg(item)}</div>
+      <div class="history-transaction-main">
+        <h3>${escapeHtml(item.name)}</h3>
+        <time>${transactionMovementDateTime(item)}</time>
+        <p>${escapeHtml(item.category || "Outros")} · ${item.repeat === "fixed" ? "Mensal" : "Não repete"}</p>
+        <small>${transactionPaymentOrigin(item)}</small>
+      </div>
+      <div class="transaction-value">
+        <strong class="${item.type === "income" ? "positive" : "negative"}">${item.type === "income" ? "+" : "-"}${money(item.amount)}</strong>
+        <span class="status ${isPaidStatus(item) ? "" : "pending"}">${statusLabel(item)}</span>
+      </div>
+      ${transactionActionButtons(item)}
+    </article>`).join("");
+}
+
+function transactionMovementDateTime(item) {
+  const [date = "", time = ""] = transactionSortValue(item).trim().split(" ");
+  return `${formatDate(date, true)} — ${time ? time.slice(0, 5) : "Sem horário"}`;
+}
+
+function transactionPaymentOrigin(item) {
+  if (item.source === "card-installment-virtual" || item.source === "card-installment") {
+    const purchase = item.sourcePurchaseId ? userCardPurchases(item.ownerId || session).find(entry => entry.id === item.sourcePurchaseId) : null;
+    const card = purchase ? userCards(item.ownerId || session).find(entry => entry.id === purchase.cardId) : null;
+    return escapeHtml(item.cardName || card?.name || item.account || "Cartão");
+  }
+  const details = [...new Set([item.paymentMethod, item.account].filter(Boolean))];
+  return escapeHtml(details.join(" · ") || "Sem forma de pagamento");
+}
+
+function categoryIconSvg(item) {
+  if (item.type === "income") return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m0 0-5 5m5-5 5 5"/><path d="M5 19h14"/></svg>`;
+  const category = String(item.category || "").toLocaleLowerCase("pt-BR");
+  if (/aliment|comida|mercado/.test(category)) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v7a3 3 0 0 0 3 3V3M7 7h3M8.5 13v8M16 3v18M16 3c3 2 3 7 0 9"/></svg>`;
+  if (/combust|gasolina/.test(category)) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16M4 21h13M7 7h7v5H7zM16 8h2l2 2v7a2 2 0 0 1-2 2h-2"/></svg>`;
+  if (/celular|telefone/.test(category)) return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10 18h4"/></svg>`;
+  if (/cartão|cartao/.test(category) || item.sourcePurchaseId) return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3 9h18M7 15h4"/></svg>`;
+  if (/moradia|casa/.test(category)) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8v10h-6v-6H9v6H3z"/></svg>`;
+  if (/serviço|servico/.test(category)) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6 4-4 4 4-4 4M18 2v8M4 20l7-7M8 4l12 12-4 4L4 8z"/></svg>`;
+  if (/lazer|entretenimento/.test(category)) return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8 12h8M12 8v8"/></svg>`;
 }
 
 function transactionSortValue(item) {
@@ -2542,6 +2602,11 @@ function bindAppEvents() {
     transactionFilter = button.dataset.filter;
     render();
   }));
+  document.querySelector("[data-transaction-search]")?.addEventListener("input", event => {
+    transactionSearch = event.currentTarget.value;
+    const results = document.querySelector("[data-transaction-results]");
+    if (results) results.innerHTML = transactionHistoryRows(filteredHistoryTransactions());
+  });
   document.querySelectorAll("[data-edit-transaction]").forEach(button => button.addEventListener("click", () => editTransaction(button.dataset.editTransaction)));
   document.querySelectorAll("[data-delete-transaction]").forEach(button => button.addEventListener("click", () => deleteTransaction(button.dataset.deleteTransaction)));
   document.querySelectorAll("[data-pay-transaction]").forEach(button => button.addEventListener("click", () => markTransactionPaid(button.dataset.payTransaction)));

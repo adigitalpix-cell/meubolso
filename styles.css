@@ -155,6 +155,19 @@ button { cursor: pointer; }
 .status { display: inline-block; margin-top: 4px; padding: 3px 7px; border-radius: 99px; font-size: 9px; font-weight: 800; background: var(--green-soft); color: var(--green); }
 .status.pending { background: #fff0d7; color: #9a6110; }
 .empty { padding: 34px 20px; text-align: center; color: var(--muted); background: white; border-radius: 18px; }
+.transaction-search { min-height: 48px; margin: 12px 0 14px; padding: 0 14px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 15px; background: white; }
+.transaction-search svg { width: 20px; height: 20px; flex: 0 0 auto; fill: none; stroke: var(--green); stroke-width: 1.9; stroke-linecap: round; }
+.transaction-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font: inherit; font-size: 12px; }
+.transaction-search input::placeholder { color: #98a19d; }
+.history-transaction { grid-template-columns: 45px minmax(0, 1fr) auto; align-items: start; padding: 14px 13px; }
+.history-transaction .transaction-icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.history-transaction-main { min-width: 0; }
+.history-transaction-main h3 { margin-bottom: 5px; }
+.history-transaction-main time { display: block; color: var(--ink); font-size: 10px; font-weight: 700; }
+.history-transaction-main p { margin-top: 5px; line-height: 1.35; }
+.history-transaction-main small { display: block; margin-top: 4px; overflow: hidden; color: #7b8782; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.history-transaction .transaction-value { padding-top: 1px; }
+.history-transaction .transaction-value strong { white-space: nowrap; }
 
 .bottom-nav {
   position: fixed; z-index: 20; bottom: 0; left: 50%; transform: translateX(-50%);

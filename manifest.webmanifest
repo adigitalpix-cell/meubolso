@@ -1,7 +1,7 @@
 {
   "name": "Minhas Finanças",
   "short_name": "MF",
-  "version": "1.0.0.40",
+  "version": "1.0.0.41",
   "description": "Controle financeiro pessoal com receitas, despesas, cartões e suporte.",
   "start_url": "/",
   "scope": "/",
