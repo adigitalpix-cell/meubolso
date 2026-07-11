@@ -6,7 +6,7 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "Meu Bolso";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.45";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.46";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -291,6 +291,7 @@ async function loadScopedDatabase(loggedUser) {
   logSupabaseLoad(loggedUser, loaded);
   isOfflineMode = false;
   db = loaded;
+  if (!isLoggedMaster) await ensureMonthlyExpenseOccurrences(loggedUser.id);
   cacheDatabase();
   return loaded;
 }
@@ -310,6 +311,7 @@ async function refreshCurrentUserData() {
 async function refreshUserFinancialData() {
   if (!navigator.onLine) {
     isOfflineMode = true;
+    await ensureMonthlyExpenseOccurrences(session);
     cacheDatabase();
     return;
   }
@@ -345,6 +347,7 @@ async function refreshUserFinancialData() {
   db.categories[session] = loaded.categories[session] || [...DEFAULT_CATEGORIES];
   db.accounts[session] = loaded.accounts[session] || [...DEFAULT_ACCOUNTS];
   isOfflineMode = false;
+  await ensureMonthlyExpenseOccurrences(session);
   cacheDatabase();
   logSupabaseLoad(user, db);
 }
@@ -853,6 +856,63 @@ function transactionToSupabaseRow(item, userId = session) {
     compra_cartao_id: item.sourcePurchaseId || null,
     parcela_id: null
   };
+}
+
+function monthlyExpenseSeriesKey(item) {
+  return [
+    String(item.name || "").trim().toLocaleLowerCase("pt-BR"),
+    Number(item.amount || 0).toFixed(2),
+    String(item.category || "Outros").trim().toLocaleLowerCase("pt-BR"),
+    String(item.account || "Conta corrente").trim().toLocaleLowerCase("pt-BR")
+  ].join("|");
+}
+
+function monthlyExpenseDueDate(items, targetMonth) {
+  const [year, month] = targetMonth.split("-").map(Number);
+  const preferredDay = Math.max(...items.map(item => Number(item.dueDate?.slice(8, 10) || 1)), 1);
+  const dueDay = Math.min(preferredDay, daysInMonth(year, month - 1));
+  return `${targetMonth}-${String(dueDay).padStart(2, "0")}`;
+}
+
+async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = dateOffset()) {
+  if (!userId) return [];
+  db.transactions[userId] ||= [];
+  const targetMonth = targetDate.slice(0, 7);
+  const monthlyExpenses = db.transactions[userId].filter(item =>
+    item.type === "expense" &&
+    item.repeat === "fixed" &&
+    item.source !== "card-installment" &&
+    item.source !== "card-installment-virtual" &&
+    item.dueDate &&
+    item.dueDate.slice(0, 7) <= targetMonth
+  );
+  const series = new Map();
+  monthlyExpenses.forEach(item => {
+    const key = monthlyExpenseSeriesKey(item);
+    series.set(key, [...(series.get(key) || []), item]);
+  });
+  const created = [];
+  series.forEach(items => {
+    if (items.some(item => item.dueDate.slice(0, 7) === targetMonth)) return;
+    const source = [...items].sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
+    if (!source || source.dueDate.slice(0, 7) >= targetMonth) return;
+    created.push({
+      ...source,
+      id: crypto.randomUUID(),
+      dueDate: monthlyExpenseDueDate(items, targetMonth),
+      status: "pending",
+      paymentMethod: "",
+      paidDate: "",
+      paidTime: "",
+      createdAt: new Date().toISOString()
+    });
+  });
+  if (!created.length) return [];
+  db.transactions[userId].unshift(...created);
+  cacheDatabase();
+  await upsertRows("despesas", created.map(item => transactionToSupabaseRow(item, userId)));
+  created.forEach(item => logActivity(`Gerou despesa mensal ${item.name} para ${targetMonth}.`, userId));
+  return created;
 }
 
 async function saveTransactionToSupabase(item, previousType = item.type) {
@@ -4404,6 +4464,7 @@ async function initializeApp() {
     if (session && isNetworkError(error) && cached) {
       db = cached;
       isOfflineMode = true;
+      await ensureMonthlyExpenseOccurrences(session);
       lastSyncError = "";
       showToast("Você está offline. As alterações serão sincronizadas quando a internet voltar.");
     } else {
