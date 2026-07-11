@@ -35,8 +35,13 @@ supabase-config.js
 manifest.webmanifest
 sw.js
 vercel.json
-icon-192.svg
-icon-512.svg
+icon-192.png
+icon-512.png
+icon-maskable-192.png
+icon-maskable-512.png
+apple-touch-icon.png
+favicon-32.png
+notification-icon.png
 README.md
 .gitignore
 ```

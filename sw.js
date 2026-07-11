@@ -1,4 +1,4 @@
-const CACHE_NAME = "minhas-financas-v1.0.0.48";
+const CACHE_NAME = "meu-bolso-v1.0.0.49";
 const ASSETS = [
   "/",
   "/index.html",
@@ -6,8 +6,13 @@ const ASSETS = [
   "/app.js",
   "/supabase-config.js",
   "/manifest.webmanifest",
-  "/icon-192.svg",
-  "/icon-512.svg"
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-192.png",
+  "/icon-maskable-512.png",
+  "/apple-touch-icon.png",
+  "/favicon-32.png",
+  "/notification-icon.png"
 ];
 
 self.addEventListener("install", event => {
@@ -49,8 +54,8 @@ self.addEventListener("push", event => {
   event.waitUntil(
     self.registration.showNotification(data.title || "MEU BOLSO", {
       body: data.body || "Você tem uma nova atualização financeira.",
-      icon: "/icon-192.svg",
-      badge: "/icon-192.svg",
+      icon: "/icon-192.png",
+      badge: "/notification-icon.png",
       tag: data.tag || "meu-bolso-notification",
       data: { url: data.url || "/" }
     })

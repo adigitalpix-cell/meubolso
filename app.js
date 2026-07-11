@@ -6,7 +6,7 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "MEU BOLSO";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.48";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.49";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -3282,8 +3282,8 @@ async function activateNotifications() {
   if (registration?.showNotification) {
     await registration.showNotification("Notificações ativadas", {
       body: "Você receberá avisos importantes do MEU BOLSO.",
-      icon: "/icon-192.svg",
-      badge: "/icon-192.svg",
+      icon: "/icon-192.png",
+      badge: "/notification-icon.png",
       tag: "notifications-enabled"
     }).catch(() => null);
   }
@@ -3316,15 +3316,15 @@ async function testNotification() {
   if (registration?.showNotification) {
     await registration.showNotification("MEU BOLSO", {
       body: "Notificações ativadas com sucesso.",
-      icon: "/icon-192.svg",
-      badge: "/icon-192.svg",
+      icon: "/icon-192.png",
+      badge: "/notification-icon.png",
       tag: "meu-bolso-teste-notificacao",
       data: { url: "/" }
     });
   } else {
     new Notification("MEU BOLSO", {
       body: "Notificações ativadas com sucesso.",
-      icon: "/icon-192.svg"
+      icon: "/icon-192.png"
     });
   }
   showToast("Notificação de teste enviada.");
@@ -3393,8 +3393,8 @@ async function showAppNotification(body, tag, url = "/") {
   const registration = await navigator.serviceWorker?.ready?.catch(() => null);
   const options = {
     body,
-    icon: "/icon-192.svg",
-    badge: "/icon-192.svg",
+    icon: "/icon-192.png",
+    badge: "/notification-icon.png",
     tag,
     data: { url }
   };
