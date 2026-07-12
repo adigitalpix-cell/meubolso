@@ -6,7 +6,6 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "MEU BOLSO";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.51";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -2522,7 +2521,7 @@ function profileTemplate() {
       <div>
         <span>Versão do Aplicativo</span>
         <h2>${escapeHtml(APP_NAME)}</h2>
-        <p>Versão ${escapeHtml(APP_VERSION)}</p>
+        <p>Versão ${escapeHtml(window.APP_BUILD_CONFIG.version)}</p>
         <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
       ${profileVersionActionsTemplate()}
