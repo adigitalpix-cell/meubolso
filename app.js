@@ -6,7 +6,7 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "MEU BOLSO";
-const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.50";
+const APP_VERSION = window.APP_BUILD_CONFIG?.version || "1.0.0.51";
 const APP_UPDATED_AT = "16/06/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
@@ -1789,7 +1789,7 @@ function dashboardDetailRows(type) {
     if (type === "soon") return item.status === "pending" && item.type !== "income" && item.dueDate > today && item.dueDate <= seven;
     if (type === "overdue" || type === "overdueValue") return item.status === "pending" && item.type !== "income" && item.dueDate < today;
     if (type === "received") return item.type === "income" && isPaidStatus(item) && paidMonthKey(item) === current;
-    if (type === "toReceive") return item.type === "income" && !isPaidStatus(item) && dueMonthKey(item) === current;
+    if (type === "toReceive") return item.type === "income" && !isPaidStatus(item);
     if (type === "paid") return item.type !== "income" && isPaidStatus(item) && paidMonthKey(item) === current;
     if (type === "toPay") return item.type !== "income" && !isPaidStatus(item) && dueMonthKey(item) === current;
     return false;
