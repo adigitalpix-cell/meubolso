@@ -78,6 +78,7 @@ let editingCardId = null;
 let editingPurchaseId = null;
 let selectedPurchaseId = null;
 let dashboardDetail = null;
+let receivablesReturnView = "home";
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
 let activeListType = "categories";
@@ -1744,6 +1745,7 @@ function toggleBalanceInfoPopover(button) {
 }
 
 function dashboardDetailTemplate(type) {
+  if (type === "toReceive") return receivablesDetailTemplate();
   const title = ({
     invoice: "Fatura detalhada",
     cards: "Resumo dos cartões",
@@ -1799,6 +1801,67 @@ function dashboardDetailRows(type) {
     return false;
   });
   return transactionRows(items, false, true);
+}
+
+function receivablesDetailTemplate() {
+  const current = monthKey();
+  const items = pendingIncomeItems();
+  const currentItems = items.filter(item => dueMonthKey(item) === current);
+  const overdueItems = items.filter(item => dueMonthKey(item) < current);
+  return `
+    <section class="dashboard-detail-page receivables-page">
+      <button class="receivables-back-header" data-close-receivables aria-label="Voltar para a tela anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span>Receitas a Receber</span>
+      </button>
+      ${receivablesSection("Receitas a Receber", currentItems, false, "Total do mês")}
+      ${receivablesSection("Receitas Atrasadas", overdueItems, true, "Total atrasado")}
+    </section>`;
+}
+
+function receivablesSection(title, items, overdue, totalLabel) {
+  const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const groups = groupReceivablesByMonth(items);
+  return `
+    <section class="receivables-section ${overdue ? "overdue" : "current"}">
+      <header><div><span>${overdue ? "Pendências anteriores" : "Mês atual"}</span><h2>${title}</h2></div><div class="receivables-total"><small>${totalLabel}</small><strong>${money(total)}</strong></div></header>
+      ${groups.length ? groups.map(group => receivablesMonthGroup(group, overdue)).join("") : `<div class="receivables-empty">Nenhuma receita ${overdue ? "atrasada" : "pendente neste mês"}.</div>`}
+    </section>`;
+}
+
+function groupReceivablesByMonth(items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const key = dueMonthKey(item);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  });
+  return [...groups.entries()].map(([key, entries]) => ({ key, entries }));
+}
+
+function receivablesMonthGroup(group, overdue) {
+  const [year, month] = group.key.split("-").map(Number);
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+  return `<div class="receivables-month-group"><h3>${escapeHtml(label.charAt(0).toUpperCase() + label.slice(1))}</h3><div class="receivables-list">${group.entries.map(item => receivableCard(item, overdue)).join("")}</div></div>`;
+}
+
+function receivableCard(item, overdue) {
+  const days = overdueDays(item);
+  return `
+    <article class="receivable-card ${overdue ? "overdue" : ""}">
+      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Vencimento: ${formatDate(item.dueDate, true)}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
+      <div class="receivable-value"><strong>${money(item.amount)}</strong><span>A receber</span></div>
+      ${overdue ? `<b class="overdue-badge">Atrasado ${days} ${days === 1 ? "dia" : "dias"}</b>` : ""}
+      <div class="receivable-actions">
+        <button class="receive-compact-action" data-pay-transaction="${escapeAttribute(item.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Receber</span></button>
+        <details class="receivable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button></div></details>
+      </div>
+    </article>`;
+}
+
+function overdueDays(item) {
+  const due = new Date(`${item.dueDate}T12:00:00`);
+  const today = new Date(`${dateOffset()}T12:00:00`);
+  return Math.max(1, Math.floor((today - due) / 86400000));
 }
 
 function pendingIncomeItems() {
@@ -2970,6 +3033,7 @@ function bindAppEvents() {
   document.querySelectorAll("[data-dashboard-detail]").forEach(button => button.addEventListener("click", async () => {
     const detail = button.dataset.dashboardDetail;
     if (detail === "toReceive" && !isMaster()) {
+      receivablesReturnView = currentView;
       try {
         await refreshUserFinancialData();
       } catch (error) {
@@ -3015,6 +3079,11 @@ function bindAppEvents() {
   }));
   document.querySelector("[data-read-all]")?.addEventListener("click", () => {
     markAllNotificationsRead();
+    render();
+  });
+  document.querySelector("[data-close-receivables]")?.addEventListener("click", () => {
+    dashboardDetail = null;
+    currentView = receivablesReturnView;
     render();
   });
   document.querySelector("[data-transaction-search]")?.addEventListener("input", event => {

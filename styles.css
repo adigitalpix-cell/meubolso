@@ -283,6 +283,45 @@ button { cursor: pointer; }
 .dashboard-grid .danger-card strong { color: var(--red); }
 .dashboard-detail { margin-bottom: 18px; }
 .dashboard-detail-page { display: grid; gap: 12px; }
+.receivables-page { gap: 14px; }
+.receivables-back-header {
+  width: max-content; max-width: 100%; padding: 4px 2px; display: flex; align-items: center; gap: 9px;
+  border: 0; color: var(--green-dark); background: transparent; font-size: 21px; font-weight: 900; letter-spacing: -.5px; text-align: left;
+}
+.receivables-back-header svg { width: 22px; height: 22px; fill: none; stroke: var(--green); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.receivables-section { padding: 15px; border: 1px solid #e2eae6; border-radius: 20px; background: #fbfcfb; box-shadow: 0 9px 25px rgba(17,47,39,.05); }
+.receivables-section > header { margin-bottom: 13px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.receivables-section > header span { color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; }
+.receivables-section > header h2 { margin: 3px 0 0; font-size: 17px; letter-spacing: -.35px; }
+.receivables-total { flex: 0 0 auto; text-align: right; }
+.receivables-total small { display: block; color: var(--muted); font-size: 8px; font-weight: 800; }
+.receivables-total strong { display: block; margin-top: 3px; color: var(--green-dark); font-size: 15px; }
+.receivables-section.overdue { border-color: #ecd8d5; background: #fcfaf9; }
+.receivables-section.overdue > header span, .receivables-section.overdue .receivables-total strong { color: var(--red); }
+.receivables-month-group + .receivables-month-group { margin-top: 14px; }
+.receivables-month-group > h3 { margin: 0 0 7px 2px; color: #6f7d78; font-size: 11px; font-weight: 900; text-transform: capitalize; }
+.receivables-list { display: grid; gap: 7px; }
+.receivable-card { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 10px; padding: 11px 12px; border: 1px solid #e8eeeb; border-radius: 15px; background: white; }
+.receivable-card.overdue { border-color: #ead8d5; background: #f6f4f3; }
+.receivable-main { min-width: 0; }
+.receivable-main h4 { margin: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.receivable-main time, .receivable-main small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+.receivable-value { text-align: right; }
+.receivable-value strong { display: block; color: var(--green); font-size: 13px; }
+.receivable-value span { display: block; margin-top: 3px; color: var(--green); font-size: 8px; font-weight: 900; text-transform: uppercase; }
+.receivable-card.overdue .receivable-main h4, .receivable-card.overdue .receivable-main time, .receivable-card.overdue .receivable-main small { color: #727a77; }
+.overdue-badge { width: max-content; padding: 4px 7px; border-radius: 99px; color: #a93636; background: var(--red-soft); font-size: 8px; letter-spacing: .25px; text-transform: uppercase; }
+.receivable-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.receive-compact-action { height: 28px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 9px; color: #0f4c3b; background: var(--lime); font-size: 9px; font-weight: 900; }
+.receive-compact-action svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+.receivable-options { position: relative; }
+.receivable-options summary { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: var(--green-dark); background: #e8efeb; cursor: pointer; list-style: none; }
+.receivable-options summary::-webkit-details-marker { display: none; }
+.receivable-options summary svg { width: 17px; height: 17px; fill: currentColor; }
+.receivable-options > div { position: absolute; z-index: 4; right: 0; top: 32px; min-width: 105px; padding: 5px; display: grid; gap: 3px; border: 1px solid #dde5e1; border-radius: 11px; background: white; box-shadow: 0 12px 28px rgba(17,47,39,.16); }
+.receivable-options button { min-height: 30px; padding: 0 9px; border: 0; border-radius: 7px; color: var(--green-dark); background: #f0f5f2; font-size: 9px; font-weight: 800; text-align: left; }
+.receivable-options button.danger { color: var(--red); background: var(--red-soft); }
+.receivables-empty { padding: 17px 10px; border-radius: 13px; color: var(--muted); background: #f1f4f2; font-size: 11px; text-align: center; }
 .expiry-notice { margin-bottom: 12px; padding: 10px 12px; border-radius: 13px; color: #94600f; background: #fff0d7; font-size: 11px; font-weight: 800; }
 .offline-banner { margin: 0 18px 14px; padding: 10px 12px; border-radius: 14px; color: #80510b; background: #fff4dc; font-size: 11px; font-weight: 800; line-height: 1.35; box-shadow: 0 8px 20px rgba(128, 81, 11, .08); }
 .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-bottom: 16px; }
