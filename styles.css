@@ -325,14 +325,14 @@ button { cursor: pointer; }
 .receivable-card.overdue .receivable-main time, .receivable-card.overdue .receivable-main small { color: #806d6b; }
 .receivable-card.overdue .receivable-value strong { color: #b62e2e; }
 .receivable-card.overdue .receivable-value span { color: #943333; background: #fde9e7; }
-.overdue-badge { width: max-content; padding: 4px 8px 4px 5px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f3c8c4; border-radius: 99px; color: #a52121; background: #ffe5e2; font-size: 8px; font-weight: 900; letter-spacing: .25px; text-transform: uppercase; }
+.overdue-badge { width: max-content; grid-column: 1; grid-row: 2; align-self: center; padding: 4px 8px 4px 5px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid #f3c8c4; border-radius: 99px; color: #a52121; background: #ffe5e2; font-size: 8px; font-weight: 900; letter-spacing: .25px; text-transform: uppercase; }
 .overdue-badge svg { width: 14px; height: 14px; fill: #d84040; stroke: white; stroke-width: 1.7; stroke-linecap: round; }
-.receivable-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.receive-compact-action { height: 29px; padding: 0 10px; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 9px; color: var(--lime); background: linear-gradient(135deg,#155f49,#083a2d); box-shadow: 0 5px 11px rgba(17,75,57,.16); font-size: 9px; font-weight: 900; }
+.receivable-actions { min-width: max-content; grid-column: 2; grid-row: 2; align-self: center; display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.receive-compact-action { height: 29px; min-height: 29px; flex: 0 0 auto; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 9px; color: var(--lime); background: linear-gradient(135deg,#155f49,#083a2d); box-shadow: 0 5px 11px rgba(17,75,57,.16); font-size: 9px; font-weight: 900; line-height: 1; white-space: nowrap; }
 .receivable-card.overdue .receive-compact-action { color: white; background: linear-gradient(135deg,#c73434,#941a1a); box-shadow: 0 5px 11px rgba(166,35,35,.15); }
 .receive-compact-action svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
-.receivable-options { position: relative; }
-.receivable-options summary { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid #dce4e0; border-radius: 9px; color: var(--green-dark); background: #f0f3f1; cursor: pointer; list-style: none; }
+.receivable-options { position: relative; flex: 0 0 29px; width: 29px; height: 29px; }
+.receivable-options summary { width: 29px; height: 29px; min-height: 29px; display: grid; place-items: center; border: 1px solid #dce4e0; border-radius: 9px; color: var(--green-dark); background: #f0f3f1; cursor: pointer; list-style: none; }
 .receivable-options[open] summary { color: var(--lime); background: var(--green-dark); border-color: var(--green-dark); }
 .receivable-options summary::-webkit-details-marker { display: none; }
 .receivable-options summary svg { width: 17px; height: 17px; fill: currentColor; }
