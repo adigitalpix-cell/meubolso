@@ -89,8 +89,8 @@
             <option value="pending">Não pago</option>
           </select>
         </label>
-        <label class="field">
-          <span class="field-title">Categoria <button class="mini-plus" type="button" data-manage-list="categories">+</button></span>
+        <label class="field field-wide">
+          <span class="field-title">Categoria</span>
           <select name="category">
             <option>Alimentação</option>
             <option>Moradia</option>
@@ -102,17 +102,48 @@
             <option>Outros</option>
           </select>
         </label>
-        <label class="field">
-          <span class="field-title">Tipo de conta <button class="mini-plus" type="button" data-manage-list="accounts">+</button></span>
-          <select name="account">
-            <option>Conta corrente</option>
-            <option>Dinheiro</option>
-            <option>Poupança</option>
-            <option>Cartão principal</option>
-          </select>
-        </label>
+        <p class="transaction-method-hint field-wide">O método de pagamento ou recebimento será solicitado ao concluir a movimentação.</p>
       </div>
       <button class="primary-button" type="submit">Salvar movimentação</button>
+    </form>
+  </dialog>
+
+  <dialog id="payment-method-dialog" class="payment-method-dialog">
+    <form id="payment-method-form">
+      <button class="icon-button payment-method-close" type="button" data-payment-method-cancel aria-label="Fechar">×</button>
+      <div class="payment-method-symbol" aria-hidden="true">✓</div>
+      <span class="eyebrow" id="payment-method-eyebrow">Concluir movimentação</span>
+      <h2 id="payment-method-title">Marcar como pago</h2>
+      <div id="payment-method-summary" class="payment-method-summary"></div>
+      <fieldset class="payment-method-options">
+        <legend id="payment-method-legend">Método de pagamento</legend>
+        <label><input type="radio" name="paymentMethod" value="Dinheiro"><span><b>Dinheiro</b><small>Pagamento em espécie</small></span></label>
+        <label><input type="radio" name="paymentMethod" value="Pix"><span><b>Pix</b><small>Transferência instantânea</small></span></label>
+        <label><input type="radio" name="paymentMethod" value="Cartão"><span><b>Cartão</b><small>Apenas registro do método</small></span></label>
+        <label><input type="radio" name="paymentMethod" value="Poupança"><span><b>Poupança</b><small>Conta poupança</small></span></label>
+      </fieldset>
+      <div class="confirm-actions">
+        <button type="button" class="secondary-button" data-payment-method-cancel>Cancelar</button>
+        <button type="submit" class="primary-button">Confirmar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="category-dialog" class="sheet category-dialog">
+    <form id="category-form">
+      <div class="sheet-handle"></div>
+      <header class="sheet-header">
+        <div><span class="eyebrow">Organização</span><h2 id="category-form-title">Nova categoria</h2></div>
+        <button class="icon-button" type="button" data-close-category-dialog aria-label="Fechar">×</button>
+      </header>
+      <label class="field"><span>Nome</span><input name="name" required maxlength="40" placeholder="Ex.: Alimentação"></label>
+      <fieldset class="category-type-options">
+        <legend>Usar em</legend>
+        <label><input type="radio" name="categoryType" value="expense" checked><span>Despesa</span></label>
+        <label><input type="radio" name="categoryType" value="income"><span>Receita</span></label>
+        <label><input type="radio" name="categoryType" value="both"><span>Ambas</span></label>
+      </fieldset>
+      <button class="primary-button" type="submit">Salvar categoria</button>
     </form>
   </dialog>
 

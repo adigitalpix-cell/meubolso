@@ -6,10 +6,21 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
 const APP_NAME = "MEU BOLSO";
-const APP_UPDATED_AT = "16/06/2026";
+const APP_UPDATED_AT = "13/07/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
-const DEFAULT_CATEGORIES = ["Alimentação", "Moradia", "Transporte", "Saúde", "Educação", "Lazer", "Salário", "Outros"];
+const DEFAULT_CATEGORY_DEFINITIONS = [
+  { name: "Alimentação", type: "expense" },
+  { name: "Moradia", type: "expense" },
+  { name: "Transporte", type: "expense" },
+  { name: "Saúde", type: "expense" },
+  { name: "Educação", type: "expense" },
+  { name: "Lazer", type: "expense" },
+  { name: "Salário", type: "income" },
+  { name: "Outros", type: "both" }
+];
+const DEFAULT_CATEGORIES = DEFAULT_CATEGORY_DEFINITIONS.map(item => ({ ...item, active: true }));
+const PAYMENT_METHODS = ["Dinheiro", "Pix", "Cartão", "Poupança"];
 const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "Poupança", "Carteira", "Mercado Pago"];
 const SUPPORT_STATUSES = { pending: "Pendente", progress: "Em Atendimento", resolved: "Resolvido" };
 let deferredInstallPrompt = null;
@@ -43,7 +54,7 @@ const seed = {
     ]
   },
   categories: {
-    "user-demo": DEFAULT_CATEGORIES
+    "user-demo": defaultCategoryRecords()
   },
   accounts: {
     "user-demo": DEFAULT_ACCOUNTS
@@ -88,6 +99,9 @@ let preferredCategory = "";
 let preferredAccount = "";
 let supportSearch = "";
 let supportStatusFilter = "all";
+let categorySearch = "";
+let categoryTypeFilter = "all";
+let editingCategoryId = null;
 
 function dateOffset(days = 0) {
   const date = new Date();
@@ -133,13 +147,28 @@ function normalizeDatabase(data = structuredClone(seed)) {
     data.transactions[user.id] ||= [];
     data.cards[user.id] ||= [];
     data.cardPurchases[user.id] ||= [];
-    data.categories[user.id] ||= [...DEFAULT_CATEGORIES];
+    data.categories[user.id] = (data.categories[user.id] || defaultCategoryRecords()).map(normalizeCategoryRecord);
     data.accounts[user.id] ||= [...DEFAULT_ACCOUNTS];
     data.cardPurchases[user.id].forEach(purchase => {
       purchase.paidInstallments ||= [];
     });
   });
   return data;
+}
+
+function normalizeCategoryRecord(item, index = 0) {
+  if (typeof item === "string") return { id: crypto.randomUUID(), name: item, type: "both", active: true };
+  const type = ["income", "expense", "both"].includes(item?.type) ? item.type : "both";
+  return {
+    id: item?.id || `local-category-${crypto.randomUUID()}`,
+    name: String(item?.name || item?.nome || "Outros").trim(),
+    type,
+    active: item?.active !== false && item?.ativo !== false
+  };
+}
+
+function defaultCategoryRecords() {
+  return DEFAULT_CATEGORIES.map(item => ({ id: crypto.randomUUID(), ...item }));
 }
 
 function loadSavedSession() {
@@ -345,7 +374,7 @@ async function refreshUserFinancialData() {
   db.transactions[session] = loaded.transactions[session] || [];
   db.cards[session] = loaded.cards[session] || [];
   db.cardPurchases[session] = loaded.cardPurchases[session] || [];
-  db.categories[session] = loaded.categories[session] || [...DEFAULT_CATEGORIES];
+  db.categories[session] = loaded.categories[session] || defaultCategoryRecords();
   db.accounts[session] = loaded.accounts[session] || [...DEFAULT_ACCOUNTS];
   isOfflineMode = false;
   await ensureMonthlyOccurrences(session);
@@ -664,12 +693,17 @@ function fromSupabaseRows(rows) {
     amount: Number(row.valor || 0),
     accessExpiresAt: row.nova_validade
   }));
-  rows.categorias.forEach(row => pushForUser(data.categories, row.usuario_id, row.nome));
+  rows.categorias.forEach(row => pushForUser(data.categories, row.usuario_id, {
+    id: row.id,
+    name: row.nome,
+    type: row.tipo || "both",
+    active: row.ativo !== false
+  }));
   rows.tiposConta.forEach(row => pushForUser(data.accounts, row.usuario_id, row.nome));
   data.users.forEach(user => {
-    data.categories[user.id] ||= [...DEFAULT_CATEGORIES];
+    data.categories[user.id] ||= defaultCategoryRecords();
     data.accounts[user.id] ||= [...DEFAULT_ACCOUNTS];
-    if (!data.categories[user.id].length) data.categories[user.id] = [...DEFAULT_CATEGORIES];
+    if (!data.categories[user.id].length) data.categories[user.id] = defaultCategoryRecords();
     if (!data.accounts[user.id].length) data.accounts[user.id] = [...DEFAULT_ACCOUNTS];
   });
   return data;
@@ -802,7 +836,7 @@ function toSupabaseRows(data) {
       nova_validade: item.accessExpiresAt,
       valor: Number(item.amount || 0)
     })),
-    categorias: Object.entries(data.categories || {}).flatMap(([userId, values]) => [...new Set(values)].map(nome => ({ id: crypto.randomUUID(), usuario_id: userId, nome }))),
+    categorias: Object.entries(data.categories || {}).flatMap(([userId, values]) => values.map((value, index) => categoryToSupabaseRow(normalizeCategoryRecord(value, index), userId))),
     tiposConta: Object.entries(data.accounts || {}).flatMap(([userId, values]) => [...new Set(values)].map(nome => ({ id: crypto.randomUUID(), usuario_id: userId, nome })))
   };
 }
@@ -1087,6 +1121,16 @@ async function saveListItemToSupabase(type, name) {
   await upsertRows(table, [{ id: crypto.randomUUID(), usuario_id: session, nome: name }], "usuario_id,nome");
 }
 
+function categoryToSupabaseRow(category, userId = session) {
+  return {
+    id: category.id || crypto.randomUUID(),
+    usuario_id: userId,
+    nome: category.name,
+    tipo: category.type || "both",
+    ativo: category.active !== false
+  };
+}
+
 function pushForUser(collection, userId, item) {
   collection[userId] ||= [];
   collection[userId].push(item);
@@ -1167,7 +1211,17 @@ function userCardPurchases(userId = session) {
 }
 
 function userCategories(userId = session) {
-  return db.categories?.[userId] || DEFAULT_CATEGORIES;
+  return userCategoryRecords(userId).filter(item => item.active).map(item => item.name);
+}
+
+function userCategoryRecords(userId = session) {
+  return (db.categories?.[userId] || defaultCategoryRecords()).map(normalizeCategoryRecord);
+}
+
+function transactionCategoryNames(type, currentName = "") {
+  const names = userCategoryRecords().filter(item => item.active && (item.type === type || item.type === "both")).map(item => item.name);
+  if (currentName && !names.includes(currentName)) names.push(currentName);
+  return names.length ? names : ["Outros"];
 }
 
 function userAccounts(userId = session) {
@@ -1374,7 +1428,7 @@ function render() {
 
 function canAccessView(view) {
   if (isMaster()) return ["home", "users", "reports", "support", "profile", "notifications", "security", "masterDashboard", "graphDashboard"].includes(view);
-  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "notifications", "profileFinancialDashboard", "profileDashboardDetail", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
+  return ["home", "transactions", "card", "cardPurchases", "purchaseEditor", "installments", "profile", "categories", "notifications", "profileFinancialDashboard", "profileDashboardDetail", "activityLog", "security", "financialDashboard", "graphDashboard", "dashboardDetail", "balanceAudit", "support"].includes(view);
 }
 
 function loginTemplate(message = "") {
@@ -1463,6 +1517,7 @@ function viewTemplate() {
   if (currentView === "masterDashboard" && isMaster()) return masterDashboardTemplate();
   if (currentView === "support") return supportTemplate();
   if (currentView === "profile") return profileTemplate();
+  if (currentView === "categories" && !isMaster()) return categoriesTemplate();
   if (currentView === "notifications") return notificationsTemplate();
   if (currentView === "activityLog" && !isMaster()) return activityLogTemplate();
   if (currentView === "security") return securityTemplate();
@@ -2656,7 +2711,7 @@ function purchaseFormTemplate(cards) {
         <label class="field"><span>Pagamento</span><select name="installments">${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${editing?.installments === index + 1 ? "selected" : ""}>${index === 0 ? "À vista" : `${index + 1}x`}</option>`).join("")}</select></label>
         <div class="field"><span>Data de fechamento da fatura</span><div class="static-field" data-invoice-info>Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}</div></div>
       </div>
-      <label class="field"><span class="field-title">Categoria <button class="mini-plus" type="button" data-manage-list="categories">+</button></span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
+      <label class="field"><span class="field-title">Categoria</span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
       <label class="field"><span>Status</span><select name="status"><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
       <button class="primary-button">Salvar compra</button>
     </form>`;
@@ -2751,12 +2806,60 @@ function profileTemplate() {
     </article>
     <div class="menu-list">
       ${isMaster() ? `<button class="menu-item" data-view="users"><span>Gerenciar usuários</span><b>›</b></button><button class="menu-item" data-view="reports"><span>Relatórios individuais</span><b>›</b></button>` : ""}
-      ${!isMaster() ? `<button class="menu-item" data-view="profileFinancialDashboard"><span>Dashboard Financeiro</span><b>›</b></button>` : ""}
+      ${!isMaster() ? `<button class="menu-item" data-view="profileFinancialDashboard"><span>Dashboard Financeiro</span><b>›</b></button><button class="menu-item" data-view="categories"><span>Categorias</span><b>›</b></button>` : ""}
       ${!isMaster() ? `<button class="menu-item" data-view="activityLog"><span>Histórico de atividades</span><b>›</b></button>` : ""}
       <button class="menu-item" data-view="support"><span>${isMaster() ? "Menu Suporte" : "Falar com o Suporte"}</span><b>›</b></button>
       <button class="menu-item" data-view="security"><span>Segurança</span><b>›</b></button>
       <button class="menu-item danger" data-logout><span>Sair da conta</span><b>›</b></button>
     </div>`;
+}
+
+function categoryTypeLabel(type) {
+  return type === "income" ? "Receita" : type === "expense" ? "Despesa" : "Ambas";
+}
+
+function categoryIconSvg() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h6l1.7 2H20v8.8a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 18.3zM4 7.5V5.7A1.7 1.7 0 0 1 5.7 4h4.7l1.7 2H18"/></svg>`;
+}
+
+function filteredCategoryRecords() {
+  const term = categorySearch.trim().toLocaleLowerCase("pt-BR");
+  return userCategoryRecords().filter(item => {
+    const matchesSearch = !term || item.name.toLocaleLowerCase("pt-BR").includes(term);
+    const matchesType = categoryTypeFilter === "all" || item.type === categoryTypeFilter;
+    return matchesSearch && matchesType;
+  }).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, "pt-BR"));
+}
+
+function categoriesTemplate() {
+  const items = filteredCategoryRecords();
+  return `
+    <button class="clickable-page-title" data-view="profile" aria-label="Voltar ao perfil"><span>←</span><div><span class="eyebrow">Organização</span><h1>Categorias</h1><p>Gerencie onde suas movimentações são organizadas.</p></div></button>
+    <section class="categories-hero">
+      <div class="categories-hero-icon">${categoryIconSvg()}</div>
+      <div><span>MB C2 · Organização</span><h2>Suas categorias</h2><p>Crie categorias específicas para receitas, despesas ou ambas.</p></div>
+      <button type="button" data-new-category aria-label="Nova categoria">+</button>
+    </section>
+    <label class="category-search"><span aria-hidden="true">⌕</span><input value="${escapeAttribute(categorySearch)}" data-category-search placeholder="Buscar categoria..."></label>
+    <div class="category-filters" role="group" aria-label="Filtrar categorias">
+      ${[["all", "Todas"], ["income", "Receitas"], ["expense", "Despesas"], ["both", "Ambas"]].map(([value, label]) => `<button type="button" class="${categoryTypeFilter === value ? "active" : ""}" data-category-filter="${value}">${label}</button>`).join("")}
+    </div>
+    <div class="category-management-list">
+      ${items.length ? items.map(categoryManagementRow).join("") : `<div class="empty">Nenhuma categoria encontrada.</div>`}
+    </div>
+    <p class="category-management-note">Categorias em uso não podem ser excluídas. Desative para manter o histórico.</p>`;
+}
+
+function categoryManagementRow(item) {
+  return `
+    <article class="category-management-row ${item.active ? "" : "inactive"}">
+      <div class="category-row-icon">${categoryIconSvg()}</div>
+      <div class="category-row-copy"><strong>${escapeHtml(item.name)}</strong><span class="category-kind ${item.type}">${categoryTypeLabel(item.type)}</span>${item.active ? "" : `<small>Desativada</small>`}</div>
+      <details class="category-options">
+        <summary aria-label="Ações da categoria ${escapeAttribute(item.name)}">⋮</summary>
+        <div><button type="button" data-edit-category="${item.id}">Editar</button><button type="button" data-toggle-category="${item.id}">${item.active ? "Desativar" : "Ativar"}</button><button type="button" class="danger" data-delete-category="${item.id}">Excluir</button></div>
+      </details>
+    </article>`;
 }
 
 function securityTemplate() {
@@ -3125,11 +3228,11 @@ async function registerUser(event) {
   db.transactions[newId] = [];
   db.cards[newId] = [];
   db.cardPurchases[newId] = [];
-  db.categories[newId] = [...DEFAULT_CATEGORIES];
+  db.categories[newId] = defaultCategoryRecords();
   db.accounts[newId] = [...DEFAULT_ACCOUNTS];
   try {
     await saveNewUserToSupabase(newUser);
-    await upsertRows("categorias", db.categories[newId].map(nome => ({ id: crypto.randomUUID(), usuario_id: newId, nome })));
+    await upsertRows("categorias", db.categories[newId].map(item => categoryToSupabaseRow(item, newId)));
     await upsertRows("tipos_conta", db.accounts[newId].map(nome => ({ id: crypto.randomUUID(), usuario_id: newId, nome })));
   } catch (error) {
     db.users = db.users.filter(user => user.id !== newId);
@@ -3266,6 +3369,29 @@ function bindAppEvents() {
     });
     bindAppEvents.receivableMenuOutsideBound = true;
   }
+  const categoryMenus = [...document.querySelectorAll(".category-options")];
+  categoryMenus.forEach(menu => menu.addEventListener("toggle", () => {
+    if (!menu.open) return;
+    categoryMenus.forEach(other => { if (other !== menu) other.open = false; });
+  }));
+  document.querySelector("[data-new-category]")?.addEventListener("click", () => openCategoryDialog());
+  document.querySelectorAll("[data-edit-category]").forEach(button => button.addEventListener("click", () => openCategoryDialog(button.dataset.editCategory)));
+  document.querySelectorAll("[data-toggle-category]").forEach(button => button.addEventListener("click", () => toggleCategory(button.dataset.toggleCategory)));
+  document.querySelectorAll("[data-delete-category]").forEach(button => button.addEventListener("click", () => deleteCategory(button.dataset.deleteCategory)));
+  document.querySelectorAll("[data-category-filter]").forEach(button => button.addEventListener("click", () => {
+    categoryTypeFilter = button.dataset.categoryFilter;
+    render();
+  }));
+  document.querySelector("[data-category-search]")?.addEventListener("input", event => {
+    categorySearch = event.currentTarget.value;
+    clearTimeout(bindAppEvents.categorySearchTimer);
+    bindAppEvents.categorySearchTimer = setTimeout(() => {
+      render();
+      const input = document.querySelector("[data-category-search]");
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+    }, 120);
+  });
   document.querySelector("[data-transaction-search]")?.addEventListener("input", event => {
     transactionSearch = event.currentTarget.value;
     const results = document.querySelector("[data-transaction-results]");
@@ -3754,16 +3880,121 @@ function confirmInvoicePayment(total) {
   });
 }
 
+function openCategoryDialog(categoryId = null) {
+  editingCategoryId = categoryId;
+  const dialog = document.querySelector("#category-dialog");
+  const form = document.querySelector("#category-form");
+  const category = categoryId ? userCategoryRecords().find(item => item.id === categoryId) : null;
+  form.reset();
+  document.querySelector("#category-form-title").textContent = category ? "Editar categoria" : "Nova categoria";
+  if (category) {
+    form.elements.name.value = category.name;
+    form.elements.categoryType.value = category.type;
+  }
+  dialog.showModal();
+}
+
+function categoryIsInUse(categoryName) {
+  return userTransactions().some(item => item.category === categoryName) || userCardPurchases().some(item => item.category === categoryName);
+}
+
+async function saveCategory(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const name = String(data.get("name") || "").trim();
+  const type = String(data.get("categoryType") || "expense");
+  if (!name) return showToast("Informe o nome da categoria.");
+  const records = userCategoryRecords();
+  const duplicate = records.some(item => item.id !== editingCategoryId && item.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"));
+  if (duplicate) return showToast("Já existe uma categoria com esse nome.");
+  const previous = records.find(item => item.id === editingCategoryId);
+  const category = { id: previous?.id || crypto.randomUUID(), name, type, active: previous?.active !== false };
+  try {
+    await upsertRows("categorias", [categoryToSupabaseRow(category)]);
+  } catch (error) {
+    console.error("[MEU BOLSO] erro ao salvar categoria", error);
+    return showToast("Não foi possível salvar a categoria. Verifique a atualização do schema.");
+  }
+  db.categories[session] = editingCategoryId ? records.map(item => item.id === editingCategoryId ? category : item) : [...records, category];
+  cacheDatabase();
+  editingCategoryId = null;
+  document.querySelector("#category-dialog")?.close();
+  showToast("Categoria salva com sucesso.");
+  render();
+}
+
+async function toggleCategory(categoryId) {
+  const records = userCategoryRecords();
+  const category = records.find(item => item.id === categoryId);
+  if (!category) return;
+  const updated = { ...category, active: !category.active };
+  try {
+    await upsertRows("categorias", [categoryToSupabaseRow(updated)]);
+  } catch (error) {
+    return showToast("Não foi possível atualizar a categoria.");
+  }
+  db.categories[session] = records.map(item => item.id === categoryId ? updated : item);
+  cacheDatabase();
+  showToast(updated.active ? "Categoria ativada." : "Categoria desativada.");
+  render();
+}
+
+async function deleteCategory(categoryId) {
+  const records = userCategoryRecords();
+  const category = records.find(item => item.id === categoryId);
+  if (!category) return;
+  if (categoryIsInUse(category.name)) return showToast("Categoria em uso. Desative para manter o histórico.");
+  if (!await confirmAction()) return;
+  try {
+    await deleteRowById("categorias", category.id);
+  } catch (error) {
+    return showDeleteError(error);
+  }
+  db.categories[session] = records.filter(item => item.id !== categoryId);
+  cacheDatabase();
+  showToast("Categoria excluída.");
+  render();
+}
+
+function requestPaymentMethod(item) {
+  const dialog = document.querySelector("#payment-method-dialog");
+  const form = document.querySelector("#payment-method-form");
+  const isIncome = item.type === "income";
+  form.reset();
+  document.querySelector("#payment-method-eyebrow").textContent = isIncome ? "Confirmar recebimento" : "Confirmar pagamento";
+  document.querySelector("#payment-method-title").textContent = isIncome ? "Marcar como recebido" : "Marcar como pago";
+  document.querySelector("#payment-method-legend").textContent = isIncome ? "Método de recebimento" : "Método de pagamento";
+  document.querySelector("#payment-method-summary").innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${money(item.amount)} · Vencimento: ${formatDate(item.dueDate, true)}</span>`;
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      resolve(value);
+    };
+    form.onsubmit = event => {
+      event.preventDefault();
+      const method = new FormData(form).get("paymentMethod");
+      if (!PAYMENT_METHODS.includes(method)) return showToast(`Selecione o método de ${isIncome ? "recebimento" : "pagamento"}.`);
+      finish(method);
+    };
+    dialog.querySelectorAll("[data-payment-method-cancel]").forEach(button => { button.onclick = () => finish(null); });
+    dialog.oncancel = event => { event.preventDefault(); finish(null); };
+    dialog.showModal();
+  });
+}
+
 function openTransactionDialog(type = "expense") {
   const dialog = document.querySelector("#transaction-dialog");
   const form = document.querySelector("#transaction-form");
   form.reset();
-  refreshTransactionLists();
   editingTransactionId = null;
   document.querySelector("#form-title").textContent = "Adicionar transação";
   form.elements.dueDate.value = dateOffset();
   form.elements.type.value = type === "income" ? "income" : "expense";
   updateStatusOptions();
+  refreshTransactionLists();
   dialog.showModal();
 }
 
@@ -3799,6 +4030,7 @@ function editTransaction(transactionId) {
   form.reset();
   form.elements.type.value = item.type;
   updateStatusOptions();
+  refreshTransactionLists(item.category);
   Object.entries(item).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value;
   });
@@ -3808,14 +4040,19 @@ function editTransaction(transactionId) {
 }
 
 document.querySelector("[data-close-dialog]").addEventListener("click", () => document.querySelector("#transaction-dialog").close());
-document.querySelectorAll("#transaction-form input[name='type']").forEach(input => input.addEventListener("change", updateStatusOptions));
+document.querySelector("[data-close-category-dialog]")?.addEventListener("click", () => document.querySelector("#category-dialog")?.close());
+document.querySelector("#category-form")?.addEventListener("submit", saveCategory);
+document.querySelectorAll("#transaction-form input[name='type']").forEach(input => input.addEventListener("change", () => {
+  updateStatusOptions();
+  refreshTransactionLists();
+}));
 document.querySelector("#transaction-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (isMaster()) return;
   const data = new FormData(event.currentTarget);
   const amount = Number(String(data.get("amount")).replace(/\./g, "").replace(",", "."));
   if (!Number.isFinite(amount) || amount <= 0) return showToast("Informe um valor válido.");
-  if (!await confirmAction()) return;
+  const existingItem = editingTransactionId ? (db.transactions[session] || []).find(item => item.id === editingTransactionId) : null;
   const values = {
     name: data.get("name").trim(),
     amount,
@@ -3824,16 +4061,26 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     dueDate: data.get("dueDate"),
     status: data.get("status"),
     category: data.get("category"),
-    account: data.get("account"),
-    paymentMethod: "",
-    paidDate: "",
-    paidTime: ""
+    account: existingItem?.account || "Conta corrente",
+    paymentMethod: existingItem?.paymentMethod || "",
+    paidDate: existingItem?.paidDate || "",
+    paidTime: existingItem?.paidTime || ""
   };
-  if (isPaidStatus(values)) {
+  const requiresPaymentMethod = isPaidStatus(values) && (!existingItem || !isPaidStatus(existingItem) || !existingItem.paymentMethod);
+  if (requiresPaymentMethod) {
+    const method = await requestPaymentMethod(values);
+    if (!method) return;
     const paidAt = nowParts();
-    values.paymentMethod = "Automático";
+    values.paymentMethod = method;
     values.paidDate = paidAt.date;
     values.paidTime = paidAt.time;
+  } else if (!isPaidStatus(values)) {
+    values.paymentMethod = "";
+    values.paidDate = "";
+    values.paidTime = "";
+    if (!await confirmAction()) return;
+  } else if (!await confirmAction()) {
+    return;
   }
   db.transactions[session] ||= [];
   let savedItem;
@@ -3882,14 +4129,16 @@ async function deleteTransaction(transactionId) {
 }
 
 async function markTransactionPaid(transactionId) {
-  if (isMaster() || !await confirmAction()) return;
+  if (isMaster()) return;
   const item = (db.transactions[session] || []).find(transaction => transaction.id === transactionId);
   if (!item) return showToast("Não foi possível concluir a operação.");
+  const method = await requestPaymentMethod(item);
+  if (!method) return;
   item.status = item.type === "income" ? "received" : "paid";
   const paidAt = nowParts();
   item.paidDate = paidAt.date;
   item.paidTime = paidAt.time;
-  item.paymentMethod = "Automático";
+  item.paymentMethod = method;
   try {
     await saveTransactionToSupabase(item);
     await refreshUserFinancialData();
@@ -3901,11 +4150,10 @@ async function markTransactionPaid(transactionId) {
   render();
 }
 
-function refreshTransactionLists() {
+function refreshTransactionLists(currentCategory = "") {
   const form = document.querySelector("#transaction-form");
   if (!form) return;
-  fillSelect(form.elements.category, userCategories(), preferredCategory);
-  fillSelect(form.elements.account, userAccounts(), preferredAccount);
+  fillSelect(form.elements.category, transactionCategoryNames(form.elements.type.value, currentCategory), currentCategory || preferredCategory);
 }
 
 function refreshPurchaseLists() {
@@ -4076,7 +4324,7 @@ async function saveUser(event) {
     db.transactions[newId] = [];
     db.cards[newId] = [];
     db.cardPurchases[newId] = [];
-    db.categories[newId] = [...DEFAULT_CATEGORIES];
+    db.categories[newId] = defaultCategoryRecords();
     db.accounts[newId] = [...DEFAULT_ACCOUNTS];
   }
   userFormOpen = false;
