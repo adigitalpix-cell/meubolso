@@ -91,6 +91,7 @@ let selectedPurchaseId = null;
 let dashboardDetail = null;
 let receivablesReturnView = "home";
 let receivedIncomeReturnView = "home";
+let payablesExpandedCardIds = new Set();
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
 let activeListType = "categories";
@@ -1929,6 +1930,7 @@ function toggleBalanceInfoPopover(button) {
 function dashboardDetailTemplate(type) {
   if (type === "toReceive") return receivablesDetailTemplate();
   if (type === "received") return receivedIncomeDetailTemplate();
+  if (type === "toPay") return payablesDetailTemplate();
   const title = ({
     invoice: "Fatura detalhada",
     cards: "Resumo dos cartões",
@@ -1984,6 +1986,142 @@ function dashboardDetailRows(type) {
     return false;
   });
   return transactionRows(items, false, true);
+}
+
+function payablesDetailTemplate() {
+  const today = dateOffset();
+  const currentMonth = monthKey();
+  const pendingExpenses = userTransactions()
+    .filter(item => item.type === "expense" && !isPaidStatus(item) && item.source !== "card-installment" && !item.sourcePurchaseId)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const currentItems = pendingExpenses.filter(item => dueMonthKey(item) === currentMonth && item.dueDate >= today);
+  const overdueItems = pendingExpenses.filter(item => item.dueDate < today);
+  const currentTotal = pendingExpenses
+    .filter(item => dueMonthKey(item) === currentMonth)
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const overdueTotal = overdueItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const cardGroups = payablesCardGroups();
+  return `
+    <section class="dashboard-detail-page payables-page">
+      <button class="receivables-back-header" data-close-payables aria-label="Voltar para a tela anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Despesas a Pagar</strong><small>Acompanhe suas despesas pendentes.</small></span>
+      </button>
+      <section class="payables-hero">
+        <i>${payablesHeroIcon()}</i>
+        <div><span>Mês atual</span><h2>Despesas a Pagar</h2><small>Total do mês</small><strong>${money(currentTotal)}</strong></div>
+        <b aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M6.5 13.5 12 19l5.5-5.5"/></svg></b>
+      </section>
+      <section class="payables-current-section">
+        <h3>${payablesCalendarIcon()}<span>${escapeHtml(payablesMonthLabel(currentMonth))}</span></h3>
+        <div class="payables-list">${currentItems.length ? currentItems.map(item => payableExpenseCard(item, false)).join("") : `<div class="payables-empty">Nenhuma despesa pendente neste mês.</div>`}</div>
+      </section>
+      <section class="payables-card-section">
+        <h3>${payablesCardIcon()}<span>Parcelas de cartão</span></h3>
+        <div class="payables-card-groups">${cardGroups.length ? cardGroups.map(payablesCardGroupTemplate).join("") : `<div class="payables-empty">Nenhuma parcela de cartão pendente.</div>`}</div>
+      </section>
+      <section class="payables-overdue-section">
+        <header><div><span>Pendências anteriores</span><h2>Despesas Atrasadas</h2><small>Total atrasado</small><strong>${money(overdueTotal)}</strong></div><i>${payablesAlertIcon()}</i></header>
+        <div class="payables-list">${overdueItems.length ? overdueItems.map(item => payableExpenseCard(item, true)).join("") : `<div class="payables-empty">Nenhuma despesa atrasada.</div>`}</div>
+      </section>
+    </section>`;
+}
+
+function payablesMonthLabel(key) {
+  const [year, month] = key.split("-").map(Number);
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function payableExpenseCard(item, overdue) {
+  const repeat = item.repeat === "fixed" ? "Mensal" : "Não repete";
+  const days = overdueDays(item);
+  return `
+    <article class="payable-expense-card ${overdue ? "overdue" : ""}">
+      <i class="payable-category-icon">${payableCategoryIconSvg(item.category)}</i>
+      <div class="payable-expense-copy"><h4>${escapeHtml(item.name)}</h4><p>${escapeHtml(item.category)} · ${formatDate(item.dueDate, true)} · ${repeat}</p><small>${escapeHtml(item.paymentMethod || item.account || "Conta corrente")}</small>${overdue ? `<b class="payable-overdue-badge">Atrasado ${days} ${days === 1 ? "dia" : "dias"}</b>` : ""}</div>
+      <div class="payable-expense-value"><strong>- ${money(item.amount)}</strong><span>${overdue ? "Atrasado" : "Não pago"}</span></div>
+      <div class="payable-actions">
+        <button type="button" class="payable-pay-button" data-pay-transaction="${escapeAttribute(item.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>
+        <details class="receivable-options payable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button></div></details>
+      </div>
+    </article>`;
+}
+
+function payablesCardGroups() {
+  const groups = new Map();
+  cardInstallmentItems().filter(item => !isPaidStatus(item)).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).forEach(item => {
+    const purchase = userCardPurchases().find(entry => entry.id === item.sourcePurchaseId);
+    const card = userCards().find(entry => entry.id === purchase?.cardId);
+    if (!purchase || !card) return;
+    const group = groups.get(card.id) || { card, items: [], total: 0 };
+    group.items.push({ ...item, purchase });
+    group.total += Number(item.amount || 0);
+    groups.set(card.id, group);
+  });
+  return [...groups.values()].sort((a, b) => a.card.name.localeCompare(b.card.name, "pt-BR"));
+}
+
+function payablesCardGroupTemplate(group) {
+  const expanded = payablesExpandedCardIds.has(group.card.id);
+  const count = group.items.length;
+  return `
+    <article class="payables-card-group ${expanded ? "expanded" : ""}">
+      <div class="payables-card-summary">
+        <i>${payablesCardIcon()}</i>
+        <div><h4>${escapeHtml(group.card.name)}</h4><p>${count} ${count === 1 ? "parcela pendente" : "parcelas pendentes"}</p></div>
+        <div class="payables-card-total"><small>Total</small><strong>${money(group.total)}</strong></div>
+      </div>
+      ${expanded ? `<div class="payables-installment-list">${group.items.map(payablesInstallmentRow).join("")}<div class="payables-installment-total"><b>Total do cartão</b><strong>${money(group.total)}</strong></div></div>` : ""}
+      <div class="payables-card-actions">
+        <button type="button" class="payable-pay-button" data-pay-payables-card="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>
+        <details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>
+        <button type="button" class="payables-toggle-card" data-toggle-payables-card="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar parcelas" : "Ver parcelas"}</span></button>
+      </div>
+    </article>`;
+}
+
+function payablesInstallmentRow(item) {
+  const number = Number(String(item.sourceInstallment).split("-").pop());
+  return `<div class="payables-installment-row"><i>${payableCategoryIconSvg(item.category)}</i><div><strong>${escapeHtml(item.purchase.name)}</strong><span>Parcela ${number}/${item.purchase.installments} · Venc. ${formatDate(item.dueDate, true)}</span></div><b>${money(item.amount)}</b></div>`;
+}
+
+function payableCategoryIconSvg(category) {
+  const key = String(category || "Outros").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+  const path = key.includes("internet") || key.includes("celular")
+    ? `<path d="M4 9a12 12 0 0 1 16 0M7 12a7.5 7.5 0 0 1 10 0M10 15a3 3 0 0 1 4 0M12 19h.01"/>`
+    : key.includes("energia") || key.includes("luz")
+      ? `<path d="M9 18h6M10 21h4M8.5 14.5a6 6 0 1 1 7 0c-1 .8-1.5 1.7-1.5 3h-4c0-1.3-.5-2.2-1.5-3z"/>`
+      : key.includes("agua")
+        ? `<path d="M12 3S6.5 9.5 6.5 14a5.5 5.5 0 0 0 11 0C17.5 9.5 12 3 12 3z"/>`
+        : key.includes("aliment")
+          ? `<path d="M7 3v7M4.5 3v4.5A2.5 2.5 0 0 0 7 10v11M9.5 3v4.5A2.5 2.5 0 0 1 7 10M16.5 3v18M16.5 3c2.2 1.2 3 3.4 3 6.5h-3"/>`
+          : key.includes("transporte") || key.includes("combust")
+            ? `<path d="M5 16V9l2-4h10l2 4v7M5 12h14M8 16v2M16 16v2M8 9h8"/>`
+            : key.includes("moradia") || key.includes("casa")
+              ? `<path d="m3 11 9-7 9 7M5.5 9.5V21h13V9.5M9.5 21v-7h5v7"/>`
+              : key.includes("saude")
+                ? `<path d="M12 20S4 15.5 4 9a4 4 0 0 1 7-2.6L12 7.5l1-1.1A4 4 0 0 1 20 9c0 6.5-8 11-8 11zM12 10v5M9.5 12.5h5"/>`
+                : key.includes("educ")
+                  ? `<path d="m3 9 9-5 9 5-9 5zM7 12v4.5c2.8 2 7.2 2 10 0V12"/>`
+                  : `<circle cx="12" cy="12" r="8"/><path d="M8.5 12h.01M12 12h.01M15.5 12h.01"/>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${path}</svg>`;
+}
+
+function payablesHeroIcon() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h5M9 12h6M9 16h3"/><path d="M18 13v7M15.5 17.5 18 20l2.5-2.5"/></svg>`;
+}
+
+function payablesCalendarIcon() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M8 3.5v4M16 3.5v4M4 10h16"/></svg>`;
+}
+
+function payablesCardIcon() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10h18M7 15h4"/></svg>`;
+}
+
+function payablesAlertIcon() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 17H3zM12 9v5M12 17h.01"/></svg>`;
 }
 
 function receivedIncomeDetailTemplate() {
@@ -3409,6 +3547,18 @@ function bindAppEvents() {
     currentView = receivedIncomeReturnView;
     render();
   });
+  document.querySelector("[data-close-payables]")?.addEventListener("click", () => {
+    dashboardDetail = null;
+    currentView = "home";
+    render();
+  });
+  document.querySelectorAll("[data-toggle-payables-card]").forEach(button => button.addEventListener("click", () => {
+    const cardId = button.dataset.togglePayablesCard;
+    if (payablesExpandedCardIds.has(cardId)) payablesExpandedCardIds.delete(cardId);
+    else payablesExpandedCardIds.add(cardId);
+    render();
+  }));
+  document.querySelectorAll("[data-pay-payables-card]").forEach(button => button.addEventListener("click", () => payPayablesCardGroup(button.dataset.payPayablesCard)));
   const receivableMenus = [...document.querySelectorAll(".receivable-options")];
   receivableMenus.forEach(menu => {
     menu.addEventListener("toggle", () => {
@@ -4880,6 +5030,56 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
   }
   logActivity(`Marcou parcela ${purchase.name} como paga. Valor: ${money(info.value)}`);
   showToast("Operação realizada com sucesso.");
+  render();
+}
+
+async function payPayablesCardGroup(cardId) {
+  if (isMaster()) return;
+  const group = payablesCardGroups().find(entry => entry.card.id === cardId);
+  if (!group?.items.length || group.total <= 0) return showToast("Não há parcelas pendentes para este cartão.");
+  const method = await requestPaymentMethod({
+    type: "expense",
+    name: `Parcelas do cartão ${group.card.name}`,
+    amount: group.total,
+    dueDate: group.items[0].dueDate
+  });
+  if (!method) return;
+  const purchaseIds = [...new Set(group.items.map(item => item.purchase.id))];
+  const purchases = purchaseIds.map(id => userCardPurchases().find(item => item.id === id)).filter(Boolean);
+  const snapshots = new Map(purchases.map(purchase => [purchase.id, {
+    paidInstallments: [...(purchase.paidInstallments || [])],
+    installmentPayments: JSON.parse(JSON.stringify(purchase.installmentPayments || {}))
+  }]));
+  const paidAt = nowParts();
+  group.items.forEach(item => {
+    const purchase = purchases.find(entry => entry.id === item.purchase.id);
+    if (!purchase) return;
+    purchase.paidInstallments ||= [];
+    purchase.installmentPayments ||= {};
+    if (!purchase.paidInstallments.includes(item.sourceInstallment)) purchase.paidInstallments.push(item.sourceInstallment);
+    purchase.installmentPayments[item.sourceInstallment] = {
+      paidDate: paidAt.date,
+      paidTime: paidAt.time,
+      paymentMethod: method,
+      account: group.card.name
+    };
+  });
+  purchases.forEach(syncPaidInstallmentTransactions);
+  try {
+    await Promise.all(purchases.map(savePurchaseToSupabase));
+    const paidTransactions = (db.transactions[session] || []).filter(item => purchaseIds.includes(item.sourcePurchaseId));
+    await Promise.all(paidTransactions.map(item => saveTransactionToSupabase(item)));
+    await refreshUserFinancialData();
+  } catch (error) {
+    purchases.forEach(purchase => {
+      const snapshot = snapshots.get(purchase.id);
+      purchase.paidInstallments = snapshot.paidInstallments;
+      purchase.installmentPayments = snapshot.installmentPayments;
+    });
+    return showToast("Não foi possível salvar no Supabase.");
+  }
+  logActivity(`Pagou parcelas do cartão ${group.card.name}. Valor: ${money(group.total)}. Método: ${method}.`);
+  showToast("Parcelas pagas com sucesso.");
   render();
 }
 

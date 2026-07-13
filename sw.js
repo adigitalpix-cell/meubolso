@@ -1,4 +1,4 @@
-const CACHE_NAME = "meu-bolso-v0.57.4";
+const CACHE_NAME = "meu-bolso-v0.58.0";
 const ASSETS = [
   "/",
   "/index.html",
