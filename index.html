@@ -46,13 +46,17 @@
     </div>
   </dialog>
 
-  <dialog id="transaction-dialog" class="sheet">
+  <dialog id="transaction-dialog" class="sheet transaction-sheet">
     <form id="transaction-form" method="dialog">
       <div class="sheet-handle"></div>
       <header class="sheet-header">
-        <div>
-          <span class="eyebrow">Nova movimentação</span>
+        <div class="transaction-header-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4v13H7zM14 3.5v4h4M12.5 12v6M9.5 15h6"/></svg>
+        </div>
+        <div class="transaction-header-copy">
+          <span class="eyebrow">NOVA MOVIMENTAÇÃO</span>
           <h2 id="form-title">Adicionar transação</h2>
+          <p>Informe os dados da movimentação</p>
         </div>
         <button class="icon-button" type="button" data-close-dialog aria-label="Fechar">×</button>
       </header>
@@ -63,33 +67,26 @@
       </div>
 
       <div class="form-grid">
-        <label class="field field-wide">
+        <label class="field field-wide transaction-name-field">
           <span>Nome</span>
           <input name="name" required maxlength="60" placeholder="Ex.: Supermercado">
         </label>
-        <label class="field">
-          <span>Valor</span>
+        <label class="field field-wide transaction-value-field">
+          <span>Valor da movimentação</span>
           <div class="money-input"><b>R$</b><input name="amount" required inputmode="decimal" placeholder="0,00"></div>
         </label>
-        <label class="field">
+        <label class="field transaction-date-field">
           <span>Vencimento</span>
           <input name="dueDate" required type="date">
         </label>
-        <label class="field">
-          <span>Pagamento</span>
+        <label class="field transaction-repeat-field">
+          <span>Repetição</span>
           <select name="repeat">
             <option value="none">Não repete</option>
             <option value="fixed">Fixo mensal</option>
           </select>
         </label>
-        <label class="field">
-          <span id="status-label">Status</span>
-          <select name="status">
-            <option value="paid">Pago</option>
-            <option value="pending">Não pago</option>
-          </select>
-        </label>
-        <label class="field field-wide">
+        <label class="field transaction-category-field">
           <span class="field-title">Categoria</span>
           <select name="category">
             <option>Alimentação</option>
@@ -102,9 +99,16 @@
             <option>Outros</option>
           </select>
         </label>
+        <label class="field transaction-status-field">
+          <span id="status-label">Status</span>
+          <select name="status">
+            <option value="paid">Pago</option>
+            <option value="pending">Não pago</option>
+          </select>
+        </label>
         <p class="transaction-method-hint field-wide">O método de pagamento ou recebimento será solicitado ao concluir a movimentação.</p>
       </div>
-      <button class="primary-button" type="submit">Salvar movimentação</button>
+      <button class="primary-button transaction-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar movimentação</span></button>
     </form>
   </dialog>
 

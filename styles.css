@@ -732,3 +732,226 @@ button { cursor: pointer; }
   .categories-hero div:nth-child(2) { padding-right: 35px; }
   .payment-method-dialog form { padding-inline: 16px; }
 }
+
+/* Adicionar transação · refinamento visual MB C2 */
+.transaction-sheet {
+  position: relative;
+  max-height: 96dvh;
+  border-radius: 30px 30px 0 0;
+  background: #fbfdfb;
+  box-shadow: 0 -18px 70px rgba(3, 34, 25, .24);
+}
+.transaction-sheet form { position: relative; padding: 0 18px 24px; }
+.transaction-sheet .sheet-handle {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 50%;
+  width: 54px;
+  height: 5px;
+  margin: 0;
+  transform: translateX(-50%);
+  background: rgba(210, 255, 221, .35);
+}
+.transaction-sheet .sheet-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -18px;
+  padding: 43px 18px 40px;
+  overflow: hidden;
+  color: #f7fff8;
+  background:
+    radial-gradient(circle at 14% 42%, rgba(80, 239, 127, .26), transparent 28%),
+    radial-gradient(circle at 88% 0, rgba(68, 187, 119, .17), transparent 38%),
+    linear-gradient(140deg, #064733 0%, #032f24 55%, #021f19 100%);
+}
+.transaction-header-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgba(194, 255, 151, .65);
+  border-radius: 50%;
+  color: #d9ff74;
+  background: rgba(4, 65, 45, .64);
+  box-shadow: 0 0 0 5px rgba(119, 247, 137, .055), 0 0 24px rgba(89, 245, 119, .25), inset 0 0 20px rgba(108, 239, 135, .08);
+}
+.transaction-header-icon svg {
+  width: 32px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.transaction-sheet .transaction-header-copy { min-width: 0; }
+.transaction-sheet .sheet-header .eyebrow { color: #c8ff6e; letter-spacing: .12em; }
+.transaction-sheet .sheet-header h2 { margin: 5px 0 4px; color: #fff; font-size: clamp(1.08rem, 5.3vw, 1.32rem); letter-spacing: -.035em; white-space: nowrap; }
+.transaction-sheet .sheet-header p { margin: 0; color: #d2e5dc; font-size: .76rem; }
+.transaction-sheet .sheet-header .icon-button {
+  align-self: start;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(216, 255, 226, .1);
+  color: #fff;
+  background: rgba(224, 255, 232, .11);
+  backdrop-filter: blur(8px);
+  outline: 0;
+}
+.transaction-sheet .sheet-header .icon-button:focus-visible { box-shadow: 0 0 0 2px #cfff77; }
+.transaction-sheet .type-selector {
+  position: relative;
+  z-index: 3;
+  gap: 5px;
+  margin: -21px 0 22px;
+  padding: 4px;
+  border: 1px solid #deebe4;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 13px 28px rgba(5, 55, 39, .12);
+}
+.transaction-sheet .type-selector span {
+  position: relative;
+  min-height: 54px;
+  padding: 18px 8px 14px 35px;
+  border: 0;
+  border-radius: 14px;
+  color: #27362f;
+  background: transparent;
+  font-size: .86rem;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.transaction-sheet .type-selector span::before {
+  position: absolute;
+  top: 50%;
+  left: calc(50% - 48px);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1.5px solid #80d65d;
+  border-radius: 50%;
+  color: #218154;
+  transform: translateY(-50%);
+  font-size: .87rem;
+  line-height: 1;
+}
+.transaction-sheet .type-selector label:first-child span::before { content: "↓"; }
+.transaction-sheet .type-selector label:last-child span::before { content: "↑"; }
+.transaction-sheet .type-selector input:checked + span {
+  color: #fff;
+  background: linear-gradient(135deg, #08704d, #033d2e);
+  box-shadow: inset 0 0 0 1px rgba(196, 255, 113, .55), 0 5px 15px rgba(8, 92, 63, .22), 0 0 14px rgba(115, 238, 94, .18);
+}
+.transaction-sheet .type-selector input:checked + span::before { border-color: #dcff9c; color: #eaffb9; }
+.transaction-sheet .form-grid { gap: 0 11px; }
+.transaction-sheet .field { gap: 8px; margin-bottom: 17px; }
+.transaction-sheet .field > span { color: #33443d; font-size: .78rem; font-weight: 760; }
+.transaction-sheet .field input,
+.transaction-sheet .field select,
+.transaction-sheet .money-input {
+  min-height: 55px;
+  border-color: #d9e3de;
+  border-radius: 15px;
+  color: #14251e;
+  background-color: #fff;
+  box-shadow: 0 4px 12px rgba(16, 51, 40, .025);
+}
+.transaction-sheet .field input:focus,
+.transaction-sheet .field select:focus,
+.transaction-sheet .money-input:focus-within {
+  border-color: #42b86f;
+  box-shadow: 0 0 0 3px rgba(72, 205, 109, .12), 0 8px 18px rgba(9, 78, 54, .06);
+}
+.transaction-sheet .transaction-name-field input { padding-inline: 17px; }
+.transaction-sheet .transaction-value-field {
+  position: relative;
+  margin-bottom: 20px;
+  padding: 16px 17px 14px;
+  border: 1px solid rgba(78, 193, 113, .12);
+  border-radius: 19px;
+  background: linear-gradient(135deg, #effaf1, #f7fcf7 58%, #eaf6ec);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+.transaction-sheet .transaction-value-field > span { color: #173a2e; font-size: .76rem; font-weight: 850; }
+.transaction-sheet .transaction-value-field .money-input {
+  min-height: 58px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.transaction-sheet .transaction-value-field .money-input b { color: #075f41; font-size: 1.32rem; }
+.transaction-sheet .transaction-value-field .money-input input {
+  min-width: 0;
+  min-height: 54px;
+  color: #076143;
+  font-size: 2.25rem;
+  font-weight: 850;
+  letter-spacing: -.045em;
+}
+.transaction-sheet .transaction-value-field .money-input input::placeholder { color: #076143; opacity: 1; }
+.transaction-sheet .transaction-method-hint {
+  position: relative;
+  min-height: 74px;
+  margin: 2px 0 20px;
+  padding: 15px 15px 15px 62px;
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(39, 164, 91, .42);
+  border-radius: 17px;
+  color: #214f3e;
+  background: linear-gradient(135deg, rgba(238, 251, 240, .98), rgba(248, 253, 249, .98));
+  box-shadow: 0 7px 18px rgba(31, 120, 74, .07);
+  font-size: .79rem;
+  line-height: 1.45;
+}
+.transaction-sheet .transaction-method-hint::before {
+  content: "i";
+  position: absolute;
+  left: 16px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #dfff83;
+  background: linear-gradient(145deg, #0b6748, #043427);
+  box-shadow: 0 0 18px rgba(73, 213, 100, .2);
+  font-size: 1rem;
+  font-weight: 900;
+  font-family: Georgia, serif;
+}
+.transaction-sheet .transaction-save-button {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(192, 255, 93, .75);
+  border-radius: 17px;
+  color: #fff;
+  background: linear-gradient(135deg, #08704d, #023b2c 72%, #032c22);
+  box-shadow: 0 9px 24px rgba(5, 89, 60, .25), 0 0 15px rgba(117, 238, 88, .22), inset 0 1px 0 rgba(230, 255, 205, .2);
+  font-size: .9rem;
+}
+.transaction-sheet .transaction-save-button:hover { background: linear-gradient(135deg, #087a53, #034431 72%, #033326); }
+.transaction-sheet .transaction-save-button svg { width: 23px; fill: none; stroke: #d8ff72; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (max-width: 380px) {
+  .transaction-sheet .sheet-header { gap: 9px; padding: 40px 13px 37px; }
+  .transaction-header-icon { width: 52px; height: 52px; }
+  .transaction-header-icon svg { width: 27px; }
+  .transaction-sheet .sheet-header h2 { font-size: 1.28rem; }
+  .transaction-sheet .sheet-header p { font-size: .68rem; }
+  .transaction-sheet .sheet-header .icon-button { width: 38px; height: 38px; }
+  .transaction-sheet .type-selector span { padding-left: 29px; font-size: .78rem; }
+  .transaction-sheet .type-selector span::before { left: calc(50% - 42px); width: 22px; height: 22px; }
+  .transaction-sheet .field input, .transaction-sheet .field select, .transaction-sheet .money-input { padding-inline: 10px; font-size: .78rem; }
+  .transaction-sheet .transaction-value-field { padding-inline: 14px; }
+  .transaction-sheet .transaction-value-field .money-input input { font-size: 1.95rem; }
+}
+
+body:has(#transaction-dialog[open]) { overflow: hidden; }
