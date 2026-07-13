@@ -1780,6 +1780,7 @@ function expiryNotice() {
 
 function dashboardDetailRows(type) {
   if (type === "invoice" || type === "cards") return type === "invoice" ? invoiceDetailRows() : cardSummaryRows();
+  if (type === "toReceive") return transactionRows(pendingIncomeItems(), false, true);
   const current = monthKey();
   const today = dateOffset();
   const seven = dateOffset(7);
@@ -1788,12 +1789,17 @@ function dashboardDetailRows(type) {
     if (type === "soon") return item.status === "pending" && item.type !== "income" && item.dueDate > today && item.dueDate <= seven;
     if (type === "overdue" || type === "overdueValue") return item.status === "pending" && item.type !== "income" && item.dueDate < today;
     if (type === "received") return item.type === "income" && isPaidStatus(item) && paidMonthKey(item) === current;
-    if (type === "toReceive") return item.type === "income" && !isPaidStatus(item);
     if (type === "paid") return item.type !== "income" && isPaidStatus(item) && paidMonthKey(item) === current;
     if (type === "toPay") return item.type !== "income" && !isPaidStatus(item) && dueMonthKey(item) === current;
     return false;
   });
   return transactionRows(items, false, true);
+}
+
+function pendingIncomeItems() {
+  return userTransactions()
+    .filter(item => item.type === "income" && !isPaidStatus(item))
+    .sort(compareTransactionsNewestFirst);
 }
 
 function invoiceDetailRows() {
@@ -2956,8 +2962,16 @@ function bindAppEvents() {
     currentView = "users";
     render();
   }));
-  document.querySelectorAll("[data-dashboard-detail]").forEach(button => button.addEventListener("click", () => {
-    dashboardDetail = button.dataset.dashboardDetail;
+  document.querySelectorAll("[data-dashboard-detail]").forEach(button => button.addEventListener("click", async () => {
+    const detail = button.dataset.dashboardDetail;
+    if (detail === "toReceive" && !isMaster()) {
+      try {
+        await refreshUserFinancialData();
+      } catch (error) {
+        console.warn("[MEU BOLSO] usando dados locais em Receitas a receber", error);
+      }
+    }
+    dashboardDetail = detail;
     currentView = "dashboardDetail";
     render();
   }));
