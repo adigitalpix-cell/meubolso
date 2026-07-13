@@ -215,6 +215,13 @@ button { cursor: pointer; }
 }
 .transaction-icon { width: 45px; height: 45px; display: grid; place-items: center; border-radius: 14px; background: var(--green-soft); color: var(--green); font-size: 18px; }
 .transaction.expense .transaction-icon, .transaction.card .transaction-icon { background: var(--red-soft); color: var(--red); }
+.transaction.past-due-income { background: #f1f3f2; border-color: #dfe4e1; }
+.transaction.past-due-income .transaction-icon { color: #7d8984; background: #e2e6e4; }
+.transaction.past-due-income h3,
+.transaction.past-due-income p,
+.transaction.past-due-income .payment-meta,
+.transaction.past-due-income .transaction-value strong,
+.transaction.past-due-income .status { color: #7d8984; }
 .transaction h3 { margin: 0 0 4px; font-size: 14px; }
 .transaction p { margin: 0; color: var(--muted); font-size: 11px; }
 .payment-meta { display: block; margin-top: 4px; color: #8b9692; font-size: 9px; line-height: 1.35; }

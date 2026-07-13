@@ -1780,7 +1780,12 @@ function expiryNotice() {
 
 function dashboardDetailRows(type) {
   if (type === "invoice" || type === "cards") return type === "invoice" ? invoiceDetailRows() : cardSummaryRows();
-  if (type === "toReceive") return transactionRows(pendingIncomeItems(), false, true);
+  if (type === "toReceive") return transactionRows(
+    pendingIncomeItems(),
+    false,
+    true,
+    item => dueMonthKey(item) < monthKey() ? "past-due-income" : ""
+  );
   const current = monthKey();
   const today = dateOffset();
   const seven = dateOffset(7);
@@ -1799,7 +1804,7 @@ function dashboardDetailRows(type) {
 function pendingIncomeItems() {
   return userTransactions()
     .filter(item => item.type === "income" && !isPaidStatus(item))
-    .sort(compareTransactionsNewestFirst);
+    .sort((a, b) => String(b.dueDate || "").localeCompare(String(a.dueDate || "")));
 }
 
 function invoiceDetailRows() {
@@ -2149,10 +2154,10 @@ function metricTile(label, value, tone, scope) {
   return `<button class="metric-tile ${tone}" data-user-scope="${scope}"><span>${label}</span><strong>${value}</strong><small>Ver usuários →</small></button>`;
 }
 
-function transactionRows(items, showOwner = false, allowActions = false) {
+function transactionRows(items, showOwner = false, allowActions = false, itemClass = () => "") {
   if (!items.length) return `<div class="empty">Nenhuma movimentação encontrada.</div>`;
   return items.map(item => `
-    <article class="transaction ${item.type}">
+    <article class="transaction ${item.type} ${itemClass(item)}">
       <div class="transaction-icon">${iconFor(item.category, item.type)}</div>
       <div><h3>${escapeHtml(item.name)}</h3><p>${transactionDescription(item, showOwner)}</p>${paymentMeta(item)}</div>
       <div class="transaction-value">
