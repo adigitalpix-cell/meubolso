@@ -291,7 +291,7 @@ async function loadScopedDatabase(loggedUser) {
   logSupabaseLoad(loggedUser, loaded);
   isOfflineMode = false;
   db = loaded;
-  if (!isLoggedMaster) await ensureMonthlyExpenseOccurrences(loggedUser.id);
+  if (!isLoggedMaster) await ensureMonthlyOccurrences(loggedUser.id);
   cacheDatabase();
   return loaded;
 }
@@ -311,7 +311,7 @@ async function refreshCurrentUserData() {
 async function refreshUserFinancialData() {
   if (!navigator.onLine) {
     isOfflineMode = true;
-    await ensureMonthlyExpenseOccurrences(session);
+    await ensureMonthlyOccurrences(session);
     cacheDatabase();
     return;
   }
@@ -347,7 +347,7 @@ async function refreshUserFinancialData() {
   db.categories[session] = loaded.categories[session] || [...DEFAULT_CATEGORIES];
   db.accounts[session] = loaded.accounts[session] || [...DEFAULT_ACCOUNTS];
   isOfflineMode = false;
-  await ensureMonthlyExpenseOccurrences(session);
+  await ensureMonthlyOccurrences(session);
   cacheDatabase();
   logSupabaseLoad(user, db);
 }
@@ -865,6 +865,107 @@ function monthlyExpenseSeriesKey(item) {
     String(item.category || "Outros").trim().toLocaleLowerCase("pt-BR"),
     String(item.account || "Conta corrente").trim().toLocaleLowerCase("pt-BR")
   ].join("|");
+}
+
+async function ensureMonthlyOccurrences(userId = session, targetDate = dateOffset()) {
+  const incomes = await ensureMonthlyIncomeOccurrences(userId, targetDate);
+  const expenses = await ensureMonthlyExpenseOccurrences(userId, targetDate);
+  return { incomes, expenses };
+}
+
+function stableHashHex(value, length = 32) {
+  const input = String(value || "");
+  const seeds = [2166136261, 2246822519, 3266489917, 668265263];
+  let output = "";
+  seeds.forEach(seed => {
+    let hash = seed >>> 0;
+    for (let index = 0; index < input.length; index += 1) {
+      hash ^= input.charCodeAt(index);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    output += hash.toString(16).padStart(8, "0");
+  });
+  while (output.length < length) output += stableHashHex(`${input}|${output}`, 32);
+  return output.slice(0, length);
+}
+
+function monthlyIncomePermanentKey(item) {
+  return [
+    String(item.name || "").trim().toLocaleLowerCase("pt-BR"),
+    Number(item.amount || 0).toFixed(2),
+    String(item.category || "Outros").trim().toLocaleLowerCase("pt-BR"),
+    String(item.account || "Conta corrente").trim().toLocaleLowerCase("pt-BR"),
+    String(item.dueDate || "").slice(8, 10),
+    "fixed"
+  ].join("|");
+}
+
+function monthlyIncomeSeriesToken(item) {
+  const compactId = String(item.id || "").replace(/-/g, "").toLowerCase();
+  if (/^[0-9a-f]{32}$/.test(compactId) && compactId[12] === "5" && compactId[16] === "b") return compactId.slice(0, 20);
+  const hash = stableHashHex(monthlyIncomePermanentKey(item), 32).split("");
+  hash[12] = "5";
+  hash[16] = "b";
+  return hash.join("").slice(0, 20);
+}
+
+function monthlyIncomeOccurrenceId(seriesToken, targetMonth) {
+  const compact = `${seriesToken}${stableHashHex(targetMonth, 12)}`.slice(0, 32);
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
+}
+
+function monthlyIncomeDueDate(items, targetMonth) {
+  const [year, month] = targetMonth.split("-").map(Number);
+  const preferredDay = Math.max(...items.map(item => Number(item.dueDate?.slice(8, 10) || 1)), 1);
+  const dueDay = Math.min(preferredDay, daysInMonth(year, month - 1));
+  return `${targetMonth}-${String(dueDay).padStart(2, "0")}`;
+}
+
+async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dateOffset()) {
+  if (!userId) return [];
+  db.transactions[userId] ||= [];
+  const targetMonth = targetDate.slice(0, 7);
+  const monthlyIncomes = db.transactions[userId].filter(item =>
+    item.type === "income" &&
+    item.repeat === "fixed" &&
+    item.dueDate &&
+    item.dueDate.slice(0, 7) <= targetMonth
+  );
+  const series = new Map();
+  monthlyIncomes.forEach(item => {
+    const token = monthlyIncomeSeriesToken(item);
+    series.set(token, [...(series.get(token) || []), item]);
+  });
+  const created = [];
+  series.forEach((items, token) => {
+    if (items.some(item => item.dueDate.slice(0, 7) === targetMonth)) return;
+    const source = [...items].sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
+    if (!source || source.dueDate.slice(0, 7) >= targetMonth) return;
+    const id = monthlyIncomeOccurrenceId(token, targetMonth);
+    if (db.transactions[userId].some(item => item.id === id)) return;
+    created.push({
+      id,
+      name: source.name,
+      amount: source.amount,
+      type: "income",
+      repeat: "fixed",
+      dueDate: monthlyIncomeDueDate(items, targetMonth),
+      status: "pending",
+      category: source.category || "Outros",
+      account: source.account || "Conta corrente",
+      paymentMethod: "",
+      paidDate: "",
+      paidTime: "",
+      notes: source.notes || source.observation || "",
+      createdAt: new Date().toISOString()
+    });
+  });
+  if (!created.length) return [];
+  db.transactions[userId].unshift(...created);
+  cacheDatabase();
+  await upsertRows("receitas", created.map(item => transactionToSupabaseRow(item, userId)));
+  created.forEach(item => logActivity(`Gerou receita mensal ${item.name} para ${targetMonth}.`, userId));
+  return created;
 }
 
 function monthlyExpenseDueDate(items, targetMonth) {
@@ -3016,10 +3117,17 @@ function bindAppEvents() {
     });
     bindAppEvents.balanceInfoOutsideBound = true;
   }
-  document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => {
+  document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", async () => {
     const target = button.dataset.view;
     if (!canAccessView(target)) return showToast("Você não tem permissão para acessar esta área.");
     if (target === "users") userListScope = "all";
+    if (target === "home" && !isMaster()) {
+      try {
+        await ensureMonthlyOccurrences(session);
+      } catch (error) {
+        console.warn("[MEU BOLSO] recorrências serão processadas na próxima sincronização", error);
+      }
+    }
     currentView = target;
     render();
   }));
@@ -4612,7 +4720,7 @@ async function initializeApp() {
     if (session && isNetworkError(error) && cached) {
       db = cached;
       isOfflineMode = true;
-      await ensureMonthlyExpenseOccurrences(session);
+      await ensureMonthlyOccurrences(session);
       lastSyncError = "";
       showToast("Você está offline. As alterações serão sincronizadas quando a internet voltar.");
     } else {
