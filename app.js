@@ -2818,8 +2818,39 @@ function categoryTypeLabel(type) {
   return type === "income" ? "Receita" : type === "expense" ? "Despesa" : "Ambas";
 }
 
-function categoryIconSvg() {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h6l1.7 2H20v8.8a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 18.3zM4 7.5V5.7A1.7 1.7 0 0 1 5.7 4h4.7l1.7 2H18"/></svg>`;
+function categoryIconSvg(name = "") {
+  const key = String(name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+  const paths = key.includes("aliment")
+    ? `<path d="M7 3v7M4.5 3v4.5A2.5 2.5 0 0 0 7 10v11M9.5 3v4.5A2.5 2.5 0 0 1 7 10M16.5 3v18M16.5 3c2.2 1.2 3 3.4 3 6.5h-3"/>`
+    : key.includes("educ")
+      ? `<path d="m3 9 9-5 9 5-9 5zM7 12v4.5c2.8 2 7.2 2 10 0V12M20 10v6"/>`
+      : key.includes("lazer")
+        ? `<path d="M7.5 8h9a4.5 4.5 0 0 1 4.2 6.1l-1.1 3a2 2 0 0 1-3.2.8L14.5 16h-5l-1.9 1.9a2 2 0 0 1-3.2-.8l-1.1-3A4.5 4.5 0 0 1 7.5 8zM7 11v4M5 13h4M16.5 12h.01M18.5 14h.01"/>`
+        : key.includes("moradia") || key.includes("casa")
+          ? `<path d="m3 11 9-7 9 7v9H6v-9M9 20v-6h6v6"/>`
+          : key.includes("salario") || key.includes("receita")
+            ? `<path d="M4 8h16v11H4zM9 8V5h6v3M4 12h16M10 12v2h4v-2"/>`
+            : key.includes("saude")
+              ? `<path d="M12 20s-8-4.6-8-10a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.4-8 10-8 10zM7.5 13h2l1.2-2.5 2.2 5 1.2-2.5h2.4"/>`
+              : key.includes("transport")
+                ? `<path d="M5 16h14l-1-7H6zM7 9l1-3h8l1 3M7 16v2M17 16v2M7.5 13h.01M16.5 13h.01"/>`
+                : key.includes("servic")
+                  ? `<path d="m14.5 6.5 3-3 3 3-3 3M16 8l-9.5 9.5M4 15l5 5M4 20l-1-1 3-7 6-3 3 3-3 6-7 3z"/>`
+                  : key.includes("outro")
+                    ? `<circle cx="12" cy="12" r="8"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>`
+                    : `<path d="M4 7.5h6l1.7 2H20v8.8a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 18.3zM4 7.5V5.7A1.7 1.7 0 0 1 5.7 4h4.7l1.7 2H18"/>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+}
+
+function categoryFilterIconSvg(type) {
+  const paths = type === "income"
+    ? `<circle cx="12" cy="12" r="8"/><path d="m8.5 13.5 3.5-3.5 3.5 3.5M12 10v7"/>`
+    : type === "expense"
+      ? `<circle cx="12" cy="12" r="8"/><path d="m8.5 10.5 3.5 3.5 3.5-3.5M12 7v7"/>`
+      : type === "both"
+        ? `<path d="M7 7h10l-2.5-2.5M17 17H7l2.5 2.5M17 7l-2.5 2.5M7 17l2.5-2.5"/>`
+        : `<path d="M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z"/>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 }
 
 function filteredCategoryRecords() {
@@ -2834,15 +2865,15 @@ function filteredCategoryRecords() {
 function categoriesTemplate() {
   const items = filteredCategoryRecords();
   return `
-    <button class="clickable-page-title" data-view="profile" aria-label="Voltar ao perfil"><span>←</span><div><span class="eyebrow">Organização</span><h1>Categorias</h1><p>Gerencie onde suas movimentações são organizadas.</p></div></button>
+    <button class="clickable-page-title categories-page-header" data-view="profile" aria-label="Voltar ao perfil"><span>←</span><div><h1>Categorias</h1><p>Gerencie suas categorias de receitas e despesas.</p></div></button>
     <section class="categories-hero">
       <div class="categories-hero-icon">${categoryIconSvg()}</div>
-      <div><span>MB C2 · Organização</span><h2>Suas categorias</h2><p>Crie categorias específicas para receitas, despesas ou ambas.</p></div>
+      <div><h2>Suas Categorias</h2><p>Crie, edite e organize categorias para receitas e despesas.</p></div>
       <button type="button" data-new-category aria-label="Nova categoria">+</button>
     </section>
-    <label class="category-search"><span aria-hidden="true">⌕</span><input value="${escapeAttribute(categorySearch)}" data-category-search placeholder="Buscar categoria..."></label>
+    <label class="category-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4 4"/></svg><input value="${escapeAttribute(categorySearch)}" data-category-search placeholder="Buscar categoria..."></label>
     <div class="category-filters" role="group" aria-label="Filtrar categorias">
-      ${[["all", "Todas"], ["income", "Receitas"], ["expense", "Despesas"], ["both", "Ambas"]].map(([value, label]) => `<button type="button" class="${categoryTypeFilter === value ? "active" : ""}" data-category-filter="${value}">${label}</button>`).join("")}
+      ${[["all", "Todas"], ["income", "Receitas"], ["expense", "Despesas"], ["both", "Ambas"]].map(([value, label]) => `<button type="button" class="${categoryTypeFilter === value ? "active" : ""}" data-category-filter="${value}">${categoryFilterIconSvg(value)}<span>${label}</span></button>`).join("")}
     </div>
     <div class="category-management-list">
       ${items.length ? items.map(categoryManagementRow).join("") : `<div class="empty">Nenhuma categoria encontrada.</div>`}
@@ -2853,7 +2884,7 @@ function categoriesTemplate() {
 function categoryManagementRow(item) {
   return `
     <article class="category-management-row ${item.active ? "" : "inactive"}">
-      <div class="category-row-icon">${categoryIconSvg()}</div>
+      <div class="category-row-icon">${categoryIconSvg(item.name)}</div>
       <div class="category-row-copy"><strong>${escapeHtml(item.name)}</strong><span class="category-kind ${item.type}">${categoryTypeLabel(item.type)}</span>${item.active ? "" : `<small>Desativada</small>`}</div>
       <details class="category-options">
         <summary aria-label="Ações da categoria ${escapeAttribute(item.name)}">⋮</summary>
@@ -3374,6 +3405,13 @@ function bindAppEvents() {
     if (!menu.open) return;
     categoryMenus.forEach(other => { if (other !== menu) other.open = false; });
   }));
+  if (!bindAppEvents.categoryMenuOutsideBound) {
+    document.addEventListener("click", event => {
+      if (event.target.closest(".category-options")) return;
+      document.querySelectorAll(".category-options[open]").forEach(menu => { menu.open = false; });
+    });
+    bindAppEvents.categoryMenuOutsideBound = true;
+  }
   document.querySelector("[data-new-category]")?.addEventListener("click", () => openCategoryDialog());
   document.querySelectorAll("[data-edit-category]").forEach(button => button.addEventListener("click", () => openCategoryDialog(button.dataset.editCategory)));
   document.querySelectorAll("[data-toggle-category]").forEach(button => button.addEventListener("click", () => toggleCategory(button.dataset.toggleCategory)));

@@ -1,7 +1,7 @@
 {
   "name": "MEU BOLSO",
   "short_name": "MEU BOLSO",
-  "version": "0.57.1",
+  "version": "0.57.2",
   "description": "Controle financeiro pessoal com receitas, despesas, cartões e suporte.",
   "start_url": "/",
   "scope": "/",
