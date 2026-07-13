@@ -1,5 +1,5 @@
 window.APP_BUILD_CONFIG = {
-  version: "0.57.3"
+  version: "0.57.4"
 };
 
 window.SUPABASE_CONFIG = {

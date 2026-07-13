@@ -521,9 +521,25 @@ async function supabaseRequest(table, { method = "GET", query = "", body = null,
     throw error;
   }
   if (!response.ok) {
-    const message = await response.text();
-    console.error("[MEU BOLSO][Supabase] erro", table, response.status, message);
-    throw new Error(message || `Erro Supabase: ${response.status}`);
+    const responseText = await response.text();
+    let payload = null;
+    try { payload = responseText ? JSON.parse(responseText) : null; } catch {}
+    const requestError = new Error(payload?.message || responseText || `Erro Supabase: ${response.status}`);
+    requestError.name = "SupabaseRequestError";
+    requestError.status = response.status;
+    requestError.code = payload?.code || "";
+    requestError.details = payload?.details || "";
+    requestError.hint = payload?.hint || "";
+    requestError.operation = `${method} ${table}`;
+    console.error("[MEU BOLSO][Supabase] erro", {
+      operation: requestError.operation,
+      status: requestError.status,
+      code: requestError.code,
+      message: requestError.message,
+      details: requestError.details,
+      hint: requestError.hint
+    });
+    throw requestError;
   }
   if (response.status === 204) return [];
   const text = await response.text();
@@ -696,7 +712,7 @@ function fromSupabaseRows(rows) {
   rows.categorias.forEach(row => pushForUser(data.categories, row.usuario_id, {
     id: row.id,
     name: row.nome,
-    type: row.tipo || "both",
+    type: categoryTypeFromSupabase(row.tipo),
     active: row.ativo !== false
   }));
   rows.tiposConta.forEach(row => pushForUser(data.accounts, row.usuario_id, row.nome));
@@ -1127,9 +1143,17 @@ function categoryToSupabaseRow(category, userId = session) {
     id: category.id || crypto.randomUUID(),
     usuario_id: userId,
     nome: category.name,
-    tipo: category.type || "both",
+    tipo: categoryTypeToSupabase(category.type),
     ativo: category.active !== false
   };
+}
+
+function categoryTypeToSupabase(type) {
+  return ({ income: "receita", expense: "despesa", both: "ambas" })[type] || "ambas";
+}
+
+function categoryTypeFromSupabase(type) {
+  return ({ receita: "income", despesa: "expense", ambas: "both", income: "income", expense: "expense", both: "both" })[type] || "both";
 }
 
 function pushForUser(collection, userId, item) {
@@ -3944,27 +3968,90 @@ function showCategoryFormMessage(message, type = "error") {
   element.className = `category-form-message${message ? ` show ${type}` : ""}`;
 }
 
-function categorySaveErrorMessage(error) {
-  const technicalMessage = String(error?.message || error || "");
+function logCategoryOperationError(operation, error, categoryId = "") {
+  console.error("[MEU BOLSO][Categorias] operação rejeitada", {
+    operation,
+    categoryId,
+    userId: session,
+    status: error?.status || "",
+    code: error?.code || "",
+    message: error?.message || String(error || ""),
+    details: error?.details || "",
+    hint: error?.hint || ""
+  });
+}
+
+function categoryOperationErrorMessage(error, operation = "create") {
+  const technicalMessage = [error?.code, error?.message, error?.details, error?.hint].filter(Boolean).join(" ");
   if (/23505|duplicate key|unique constraint/i.test(technicalMessage)) return "Já existe uma categoria com esse nome e tipo.";
-  if (/42501|row-level security|permission denied|401|403/i.test(technicalMessage)) return "Sua conta não tem permissão para salvar esta categoria.";
-  if (/42703|column categorias\.(tipo|ativo) does not exist/i.test(technicalMessage)) return "A estrutura de categorias precisa ser atualizada no Supabase antes de salvar.";
+  if (/42501|row-level security|permission denied|401|403/i.test(technicalMessage)) return "Sua conta não tem permissão para alterar esta categoria.";
+  if (/42703|PGRST204|schema cache|categorias\.(tipo|ativo)/i.test(technicalMessage)) return "A estrutura de categorias precisa ser atualizada no Supabase.";
   if (/failed to fetch|network|internet|conex/i.test(technicalMessage)) return "Falha de conexão. Verifique sua internet e tente novamente.";
-  return "Não foi possível salvar a categoria. Tente novamente.";
+  return ({
+    create: "Não foi possível salvar a categoria.",
+    update: "Não foi possível atualizar a categoria.",
+    deactivate: "Não foi possível desativar a categoria.",
+    reactivate: "Não foi possível reativar a categoria.",
+    delete: "Não foi possível excluir a categoria."
+  })[operation] || "Não foi possível concluir a operação da categoria.";
 }
 
-async function persistCategoryAndConfirm(category) {
-  const row = categoryToSupabaseRow(category);
-  await upsertRows("categorias", [row]);
-  const query = `select=id,nome,tipo,ativo,criado_em,usuario_id&id=eq.${encodeURIComponent(row.id)}&usuario_id=eq.${encodeURIComponent(session)}&limit=1`;
-  const confirmedRows = await supabaseSelect("categorias", query);
-  const confirmed = confirmedRows[0];
-  if (!confirmed || confirmed.usuario_id !== session) throw new Error("CATEGORY_PERSISTENCE_NOT_CONFIRMED");
-  return normalizeCategoryRecord({ id: confirmed.id, name: confirmed.nome, type: confirmed.tipo, active: confirmed.ativo });
+function categoryFromSupabaseRow(row) {
+  return normalizeCategoryRecord({
+    id: row.id,
+    name: row.nome,
+    type: categoryTypeFromSupabase(row.tipo),
+    active: row.ativo !== false
+  });
 }
 
-function categoryIsInUse(categoryName) {
-  return userTransactions().some(item => item.category === categoryName) || userCardPurchases().some(item => item.category === categoryName);
+async function createCategoryInSupabase(category) {
+  const rows = await supabaseRequest("categorias", {
+    method: "POST",
+    body: [categoryToSupabaseRow(category)],
+    prefer: "return=representation"
+  });
+  const confirmed = rows[0];
+  if (!confirmed || confirmed.id !== category.id || confirmed.usuario_id !== session) throw new Error("CATEGORY_CREATE_NOT_CONFIRMED");
+  return categoryFromSupabaseRow(confirmed);
+}
+
+async function updateCategoryInSupabase(categoryId, changes) {
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(changes, "name")) payload.nome = changes.name;
+  if (Object.prototype.hasOwnProperty.call(changes, "type")) payload.tipo = categoryTypeToSupabase(changes.type);
+  if (Object.prototype.hasOwnProperty.call(changes, "active")) payload.ativo = changes.active;
+  const query = supabaseAnd(supabaseEq("id", categoryId), supabaseEq("usuario_id", session));
+  const rows = await supabaseRequest("categorias", { method: "PATCH", query, body: payload, prefer: "return=representation" });
+  const confirmed = rows[0];
+  if (!confirmed || confirmed.id !== categoryId || confirmed.usuario_id !== session) throw new Error("CATEGORY_UPDATE_NOT_CONFIRMED");
+  return categoryFromSupabaseRow(confirmed);
+}
+
+function categoryMatchesTransaction(category, item) {
+  if (item.categoryId) return item.categoryId === category.id;
+  return String(item.category || "").trim().toLocaleLowerCase("pt-BR") === category.name.trim().toLocaleLowerCase("pt-BR");
+}
+
+function categoryIsInLocalUse(category) {
+  return userTransactions().some(item => categoryMatchesTransaction(category, item)) || userCardPurchases().some(item => categoryMatchesTransaction(category, item));
+}
+
+async function categoryIsInSupabaseUse(category) {
+  const result = await supabaseRequest("rpc/categoria_em_uso", {
+    method: "POST",
+    body: { p_categoria_id: category.id, p_usuario_id: session },
+    prefer: "return=representation"
+  });
+  return result === true;
+}
+
+async function deleteCategoryInSupabase(categoryId) {
+  const query = supabaseAnd(supabaseEq("id", categoryId), supabaseEq("usuario_id", session));
+  const deleted = await supabaseRequest("categorias", { method: "DELETE", query, prefer: "return=representation" });
+  if (deleted.length !== 1 || deleted[0].id !== categoryId || deleted[0].usuario_id !== session) throw new Error("CATEGORY_DELETE_NOT_CONFIRMED");
+  const remaining = await supabaseSelect("categorias", `select=id&${query}&limit=1`);
+  if (remaining.length) throw new Error("CATEGORY_DELETE_STILL_PRESENT");
 }
 
 async function saveCategory(event) {
@@ -3984,19 +4071,17 @@ async function saveCategory(event) {
   if (duplicate) return showCategoryFormMessage("Já existe uma categoria com esse nome e tipo.");
   const previous = records.find(item => item.id === editingCategoryId);
   const category = { id: previous?.id || crypto.randomUUID(), name, type, active: previous?.active !== false };
+  const operation = previous ? "update" : "create";
   const submitButton = form.querySelector('button[type="submit"]');
   if (submitButton) submitButton.disabled = true;
   let confirmedCategory;
   try {
-    confirmedCategory = await persistCategoryAndConfirm(category);
+    confirmedCategory = previous
+      ? await updateCategoryInSupabase(previous.id, { name, type })
+      : await createCategoryInSupabase(category);
   } catch (error) {
-    console.error("[MEU BOLSO][Categorias] erro técnico completo ao salvar", {
-      error,
-      categoryId: category.id,
-      categoryType: category.type,
-      userId: session
-    });
-    showCategoryFormMessage(categorySaveErrorMessage(error));
+    logCategoryOperationError(operation, error, category.id);
+    showCategoryFormMessage(categoryOperationErrorMessage(error, operation));
     return;
   } finally {
     if (submitButton) submitButton.disabled = false;
@@ -4013,13 +4098,17 @@ async function toggleCategory(categoryId) {
   const records = userCategoryRecords();
   const category = records.find(item => item.id === categoryId);
   if (!category) return;
+  if (!navigator.onLine) return showToast(`Não foi possível ${category.active ? "desativar" : "reativar"} a categoria. Verifique sua conexão.`);
   const updated = { ...category, active: !category.active };
+  const operation = updated.active ? "reactivate" : "deactivate";
+  let confirmed;
   try {
-    await upsertRows("categorias", [categoryToSupabaseRow(updated)]);
+    confirmed = await updateCategoryInSupabase(category.id, { active: updated.active });
   } catch (error) {
-    return showToast("Não foi possível atualizar a categoria.");
+    logCategoryOperationError(operation, error, category.id);
+    return showToast(categoryOperationErrorMessage(error, operation));
   }
-  db.categories[session] = records.map(item => item.id === categoryId ? updated : item);
+  db.categories[session] = records.map(item => item.id === categoryId ? confirmed : item);
   cacheDatabase();
   showToast(updated.active ? "Categoria ativada." : "Categoria desativada.");
   render();
@@ -4029,12 +4118,21 @@ async function deleteCategory(categoryId) {
   const records = userCategoryRecords();
   const category = records.find(item => item.id === categoryId);
   if (!category) return;
-  if (categoryIsInUse(category.name)) return showToast("Categoria em uso. Desative para manter o histórico.");
+  if (!navigator.onLine) return showToast("Não foi possível excluir a categoria. Verifique sua conexão.");
+  let inUse;
+  try {
+    inUse = categoryIsInLocalUse(category) || await categoryIsInSupabaseUse(category);
+  } catch (error) {
+    logCategoryOperationError("check-use", error, category.id);
+    return showToast("Não foi possível verificar se a categoria está em uso.");
+  }
+  if (inUse) return showToast("Esta categoria está em uso. Desative-a para manter o histórico.");
   if (!await confirmAction()) return;
   try {
-    await deleteRowById("categorias", category.id);
+    await deleteCategoryInSupabase(category.id);
   } catch (error) {
-    return showDeleteError(error);
+    logCategoryOperationError("delete", error, category.id);
+    return showToast(categoryOperationErrorMessage(error, "delete"));
   }
   db.categories[session] = records.filter(item => item.id !== categoryId);
   cacheDatabase();
