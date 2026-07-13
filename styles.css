@@ -724,6 +724,9 @@ button { cursor: pointer; }
 .category-type-options input { position: absolute; opacity: 0; }
 .category-type-options span { display: block; padding: 11px 6px; border: 1px solid #dce7e2; border-radius: 12px; text-align: center; font-size: .75rem; font-weight: 800; }
 .category-type-options input:checked + span { border-color: #176b4d; color: #fff; background: #0a4b37; }
+.category-form-message { display: none; margin: 0 0 12px; padding: 11px 12px; border: 1px solid #efb7b7; border-radius: 11px; color: #8d2020; background: #fff1f1; font-size: .76rem; font-weight: 700; line-height: 1.4; }
+.category-form-message.show { display: block; }
+.category-form-message.success { border-color: #9dd8b5; color: #07513a; background: #edf9f1; }
 
 @media (max-width: 380px) {
   body { min-width: 0; }
@@ -957,21 +960,6 @@ button { cursor: pointer; }
 body:has(#transaction-dialog[open]) { overflow: hidden; }
 
 /* Categorias · refinamento visual MB C2 */
-.categories-page-header {
-  align-items: center;
-  gap: 14px;
-  padding: 9px 2px 12px;
-}
-.categories-page-header > span {
-  flex: 0 0 auto;
-  padding: 0;
-  color: #07513a;
-  font-size: 1.65rem;
-  font-weight: 500;
-  line-height: 1;
-}
-.categories-page-header h1 { margin: 0 0 3px; color: #102b22; font-size: 1.7rem; letter-spacing: -.045em; }
-.categories-page-header p { margin: 0; color: #62716b; font-size: .76rem; line-height: 1.35; }
 .categories-hero {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 18px;
@@ -1081,8 +1069,6 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
 .category-management-note { margin-top: 12px; }
 
 @media (max-width: 380px) {
-  .categories-page-header h1 { font-size: 1.48rem; }
-  .categories-page-header p { font-size: .69rem; }
   .categories-hero { gap: 12px; padding: 19px 14px; }
   .categories-hero-icon { width: 57px; height: 57px; }
   .categories-hero-icon svg { width: 30px; }

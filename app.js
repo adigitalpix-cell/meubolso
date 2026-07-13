@@ -434,7 +434,7 @@ async function persistDatabase() {
   const payload = toSupabaseRows(db);
   await upsertRows("usuarios", payload.usuarios);
   await Promise.all([
-    upsertRows("categorias", payload.categorias, "usuario_id,nome"),
+    upsertRows("categorias", payload.categorias),
     upsertRows("tipos_conta", payload.tiposConta, "usuario_id,nome"),
     upsertRows("receitas", payload.receitas),
     upsertRows("despesas", payload.despesas),
@@ -1118,7 +1118,8 @@ async function savePurchaseToSupabase(purchase) {
 
 async function saveListItemToSupabase(type, name) {
   const table = type === "categories" ? "categorias" : "tipos_conta";
-  await upsertRows(table, [{ id: crypto.randomUUID(), usuario_id: session, nome: name }], "usuario_id,nome");
+  const conflictColumns = type === "categories" ? "" : "usuario_id,nome";
+  await upsertRows(table, [{ id: crypto.randomUUID(), usuario_id: session, nome: name }], conflictColumns);
 }
 
 function categoryToSupabaseRow(category, userId = session) {
@@ -2865,7 +2866,10 @@ function filteredCategoryRecords() {
 function categoriesTemplate() {
   const items = filteredCategoryRecords();
   return `
-    <button class="clickable-page-title categories-page-header" data-view="profile" aria-label="Voltar ao perfil"><span>←</span><div><h1>Categorias</h1><p>Gerencie suas categorias de receitas e despesas.</p></div></button>
+    <button class="receivables-back-header" data-view="profile" aria-label="Voltar para a tela anterior">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+      <span><strong>Categorias</strong><small>Gerencie suas categorias de receitas e despesas.</small></span>
+    </button>
     <section class="categories-hero">
       <div class="categories-hero-icon">${categoryIconSvg()}</div>
       <div><h2>Suas Categorias</h2><p>Crie, edite e organize categorias para receitas e despesas.</p></div>
@@ -3924,6 +3928,7 @@ function openCategoryDialog(categoryId = null) {
   const form = document.querySelector("#category-form");
   const category = categoryId ? userCategoryRecords().find(item => item.id === categoryId) : null;
   form.reset();
+  showCategoryFormMessage("");
   document.querySelector("#category-form-title").textContent = category ? "Editar categoria" : "Nova categoria";
   if (category) {
     form.elements.name.value = category.name;
@@ -3932,28 +3937,71 @@ function openCategoryDialog(categoryId = null) {
   dialog.showModal();
 }
 
+function showCategoryFormMessage(message, type = "error") {
+  const element = document.querySelector("#category-form-message");
+  if (!element) return;
+  element.textContent = message;
+  element.className = `category-form-message${message ? ` show ${type}` : ""}`;
+}
+
+function categorySaveErrorMessage(error) {
+  const technicalMessage = String(error?.message || error || "");
+  if (/23505|duplicate key|unique constraint/i.test(technicalMessage)) return "Já existe uma categoria com esse nome e tipo.";
+  if (/42501|row-level security|permission denied|401|403/i.test(technicalMessage)) return "Sua conta não tem permissão para salvar esta categoria.";
+  if (/42703|column categorias\.(tipo|ativo) does not exist/i.test(technicalMessage)) return "A estrutura de categorias precisa ser atualizada no Supabase antes de salvar.";
+  if (/failed to fetch|network|internet|conex/i.test(technicalMessage)) return "Falha de conexão. Verifique sua internet e tente novamente.";
+  return "Não foi possível salvar a categoria. Tente novamente.";
+}
+
+async function persistCategoryAndConfirm(category) {
+  const row = categoryToSupabaseRow(category);
+  await upsertRows("categorias", [row]);
+  const query = `select=id,nome,tipo,ativo,criado_em,usuario_id&id=eq.${encodeURIComponent(row.id)}&usuario_id=eq.${encodeURIComponent(session)}&limit=1`;
+  const confirmedRows = await supabaseSelect("categorias", query);
+  const confirmed = confirmedRows[0];
+  if (!confirmed || confirmed.usuario_id !== session) throw new Error("CATEGORY_PERSISTENCE_NOT_CONFIRMED");
+  return normalizeCategoryRecord({ id: confirmed.id, name: confirmed.nome, type: confirmed.tipo, active: confirmed.ativo });
+}
+
 function categoryIsInUse(categoryName) {
   return userTransactions().some(item => item.category === categoryName) || userCardPurchases().some(item => item.category === categoryName);
 }
 
 async function saveCategory(event) {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = new FormData(form);
   const name = String(data.get("name") || "").trim();
   const type = String(data.get("categoryType") || "expense");
-  if (!name) return showToast("Informe o nome da categoria.");
+  showCategoryFormMessage("");
+  if (!name) return showCategoryFormMessage("Informe o nome da categoria.");
+  if (!["income", "expense", "both"].includes(type)) return showCategoryFormMessage("Selecione um tipo válido para a categoria.");
+  if (!SUPABASE_READY) return showCategoryFormMessage("A conexão com o Supabase não está configurada.");
+  if (!navigator.onLine) return showCategoryFormMessage("Falha de conexão. Conecte-se à internet para salvar a categoria.");
   const records = userCategoryRecords();
-  const duplicate = records.some(item => item.id !== editingCategoryId && item.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"));
-  if (duplicate) return showToast("Já existe uma categoria com esse nome.");
+  const normalizedName = name.toLocaleLowerCase("pt-BR");
+  const duplicate = records.some(item => item.id !== editingCategoryId && item.type === type && item.name.trim().toLocaleLowerCase("pt-BR") === normalizedName);
+  if (duplicate) return showCategoryFormMessage("Já existe uma categoria com esse nome e tipo.");
   const previous = records.find(item => item.id === editingCategoryId);
   const category = { id: previous?.id || crypto.randomUUID(), name, type, active: previous?.active !== false };
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  let confirmedCategory;
   try {
-    await upsertRows("categorias", [categoryToSupabaseRow(category)]);
+    confirmedCategory = await persistCategoryAndConfirm(category);
   } catch (error) {
-    console.error("[MEU BOLSO] erro ao salvar categoria", error);
-    return showToast("Não foi possível salvar a categoria. Verifique a atualização do schema.");
+    console.error("[MEU BOLSO][Categorias] erro técnico completo ao salvar", {
+      error,
+      categoryId: category.id,
+      categoryType: category.type,
+      userId: session
+    });
+    showCategoryFormMessage(categorySaveErrorMessage(error));
+    return;
+  } finally {
+    if (submitButton) submitButton.disabled = false;
   }
-  db.categories[session] = editingCategoryId ? records.map(item => item.id === editingCategoryId ? category : item) : [...records, category];
+  db.categories[session] = editingCategoryId ? records.map(item => item.id === editingCategoryId ? confirmedCategory : item) : [...records, confirmedCategory];
   cacheDatabase();
   editingCategoryId = null;
   document.querySelector("#category-dialog")?.close();
