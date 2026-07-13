@@ -79,6 +79,7 @@ let editingPurchaseId = null;
 let selectedPurchaseId = null;
 let dashboardDetail = null;
 let receivablesReturnView = "home";
+let receivedIncomeReturnView = "home";
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
 let activeListType = "categories";
@@ -1847,6 +1848,7 @@ function toggleBalanceInfoPopover(button) {
 
 function dashboardDetailTemplate(type) {
   if (type === "toReceive") return receivablesDetailTemplate();
+  if (type === "received") return receivedIncomeDetailTemplate();
   const title = ({
     invoice: "Fatura detalhada",
     cards: "Resumo dos cartões",
@@ -1902,6 +1904,51 @@ function dashboardDetailRows(type) {
     return false;
   });
   return transactionRows(items, false, true);
+}
+
+function receivedIncomeDetailTemplate() {
+  const items = dashboardMonthReceivedItems();
+  const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const groups = groupReceivedIncomesByMonth(items);
+  return `
+    <section class="dashboard-detail-page receivables-page received-income-page">
+      <button class="receivables-back-header" data-close-received-income aria-label="Voltar para a tela anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Receitas Recebidas</strong><small>Confira as receitas recebidas no mês</small></span>
+      </button>
+      <section class="receivables-section current received-income-section">
+        <header><i class="receivables-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8 12 2.7 2.7L16.5 9"/></svg></i><div class="receivables-section-title"><span>Recebido no mês</span><h2>Receitas Recebidas</h2></div><div class="receivables-total"><small>Total recebido</small><strong>${money(total)}</strong></div></header>
+        ${groups.length ? groups.map(receivedIncomeMonthGroup).join("") : `<div class="receivables-empty">Nenhuma receita recebida neste mês.</div>`}
+      </section>
+    </section>`;
+}
+
+function groupReceivedIncomesByMonth(items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const key = paidMonthKey(item);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  });
+  return [...groups.entries()].map(([key, entries]) => ({ key, entries }));
+}
+
+function receivedIncomeMonthGroup(group) {
+  const [year, month] = group.key.split("-").map(Number);
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+  return `<div class="receivables-month-group"><h3>${escapeHtml(label.charAt(0).toUpperCase() + label.slice(1))}</h3><div class="receivables-list">${group.entries.map(receivedIncomeCard).join("")}</div></div>`;
+}
+
+function receivedIncomeCard(item) {
+  const receivedDate = item.paidDate || item.dueDate;
+  return `
+    <article class="receivable-card received-income-card">
+      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Recebimento: ${formatDate(receivedDate, true)}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
+      <div class="receivable-value"><strong>${money(item.amount)}</strong><span>Recebido</span></div>
+      <b class="received-date-badge"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="m5.5 9 2.2 2.2 4.8-5"/></svg><span>Recebido em ${formatDate(receivedDate, true)}</span></b>
+      <div class="receivable-actions received-income-actions">
+        <details class="receivable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button></div></details>
+      </div>
+    </article>`;
 }
 
 function receivablesDetailTemplate() {
@@ -3140,6 +3187,7 @@ function bindAppEvents() {
   }));
   document.querySelectorAll("[data-dashboard-detail]").forEach(button => button.addEventListener("click", async () => {
     const detail = button.dataset.dashboardDetail;
+    if (detail === "received") receivedIncomeReturnView = currentView;
     if (detail === "toReceive" && !isMaster()) {
       receivablesReturnView = currentView;
       try {
@@ -3192,6 +3240,11 @@ function bindAppEvents() {
   document.querySelector("[data-close-receivables]")?.addEventListener("click", () => {
     dashboardDetail = null;
     currentView = receivablesReturnView;
+    render();
+  });
+  document.querySelector("[data-close-received-income]")?.addEventListener("click", () => {
+    dashboardDetail = null;
+    currentView = receivedIncomeReturnView;
     render();
   });
   const receivableMenus = [...document.querySelectorAll(".receivable-options")];
