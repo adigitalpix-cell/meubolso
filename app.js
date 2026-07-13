@@ -1812,7 +1812,7 @@ function receivablesDetailTemplate() {
     <section class="dashboard-detail-page receivables-page">
       <button class="receivables-back-header" data-close-receivables aria-label="Voltar para a tela anterior">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
-        <span>Receitas a Receber</span>
+        <span><strong>Receitas a Receber</strong><small>Acompanhe suas receitas pendentes</small></span>
       </button>
       ${receivablesSection("Receitas a Receber", currentItems, false, "Total do mês")}
       ${receivablesSection("Receitas Atrasadas", overdueItems, true, "Total atrasado")}
@@ -1824,7 +1824,7 @@ function receivablesSection(title, items, overdue, totalLabel) {
   const groups = groupReceivablesByMonth(items);
   return `
     <section class="receivables-section ${overdue ? "overdue" : "current"}">
-      <header><div><span>${overdue ? "Pendências anteriores" : "Mês atual"}</span><h2>${title}</h2></div><div class="receivables-total"><small>${totalLabel}</small><strong>${money(total)}</strong></div></header>
+      <header><i class="receivables-section-icon" aria-hidden="true">${overdue ? `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v6M12 17v.2"/></svg>` : `<svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M8 3.5v4M16 3.5v4M4 10h16"/></svg>`}</i><div class="receivables-section-title"><span>${overdue ? "Pendências anteriores" : "Mês atual"}</span><h2>${title}</h2></div><div class="receivables-total"><small>${totalLabel}</small><strong>${money(total)}</strong></div></header>
       ${groups.length ? groups.map(group => receivablesMonthGroup(group, overdue)).join("") : `<div class="receivables-empty">Nenhuma receita ${overdue ? "atrasada" : "pendente neste mês"}.</div>`}
     </section>`;
 }
@@ -1850,7 +1850,7 @@ function receivableCard(item, overdue) {
     <article class="receivable-card ${overdue ? "overdue" : ""}">
       <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Vencimento: ${formatDate(item.dueDate, true)}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
       <div class="receivable-value"><strong>${money(item.amount)}</strong><span>A receber</span></div>
-      ${overdue ? `<b class="overdue-badge">Atrasado ${days} ${days === 1 ? "dia" : "dias"}</b>` : ""}
+      ${overdue ? `<b class="overdue-badge"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="M9 5.2v5M9 13v.2"/></svg><span>Atrasado ${days} ${days === 1 ? "dia" : "dias"}</span></b>` : ""}
       <div class="receivable-actions">
         <button class="receive-compact-action" data-pay-transaction="${escapeAttribute(item.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Receber</span></button>
         <details class="receivable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button></div></details>
@@ -3086,6 +3086,25 @@ function bindAppEvents() {
     currentView = receivablesReturnView;
     render();
   });
+  const receivableMenus = [...document.querySelectorAll(".receivable-options")];
+  receivableMenus.forEach(menu => {
+    menu.addEventListener("toggle", () => {
+      if (!menu.open) return;
+      receivableMenus.forEach(other => {
+        if (other !== menu) other.open = false;
+      });
+    });
+    menu.addEventListener("click", event => {
+      if (event.target.closest("button")) menu.open = false;
+    });
+  });
+  if (!bindAppEvents.receivableMenuOutsideBound) {
+    document.addEventListener("click", event => {
+      if (event.target.closest(".receivable-options")) return;
+      document.querySelectorAll(".receivable-options[open]").forEach(menu => { menu.open = false; });
+    });
+    bindAppEvents.receivableMenuOutsideBound = true;
+  }
   document.querySelector("[data-transaction-search]")?.addEventListener("input", event => {
     transactionSearch = event.currentTarget.value;
     const results = document.querySelector("[data-transaction-results]");
