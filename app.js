@@ -1810,7 +1810,7 @@ function monthSituationTemplate(dashboard, monthNet) {
 
 function dashboardMonthReceivedItems() {
   const current = monthKey();
-  return dashboardTransactions()
+  return transactionHistoryItems()
     .filter(item => item.type === "income" && isPaidStatus(item) && paidMonthKey(item) === current)
     .sort(compareTransactionsNewestFirst);
 }
@@ -2825,49 +2825,192 @@ function statusLabel(item) {
 function transactionsTemplate() {
   const filtered = filteredHistoryTransactions();
   return `
-    <div class="page-title"><span class="eyebrow">Seu histórico</span><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></div>
-    <div class="filters">
-      ${filterButton("all", "Todas")}${filterButton("income", "Receitas")}${filterButton("expense", "Despesas")}
+    <header class="transactions-page-header"><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></header>
+    <div class="transaction-filters" role="group" aria-label="Filtrar transações">
+      ${filterButton("all", "Todas")}${filterButton("income", "Receitas")}${filterButton("expense", "Despesas")}${filterButton("card", "Cartões")}
     </div>
     <label class="transaction-search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>
       <input type="search" data-transaction-search value="${escapeAttribute(transactionSearch)}" placeholder="Buscar transação..." autocomplete="off">
     </label>
-    <div class="transaction-list transaction-history-list" data-transaction-results>${transactionHistoryRows(filtered)}</div>`;
+    <div class="transaction-history-list" data-transaction-results>${transactionHistoryRows(filtered)}</div>`;
 }
 
 function filteredHistoryTransactions() {
-  const search = transactionSearch.trim().toLocaleLowerCase("pt-BR");
-  return userTransactions()
-    .filter(item => transactionFilter === "all" || item.type === transactionFilter)
+  const search = normalizeTransactionSearch(transactionSearch);
+  return dashboardTransactions()
+    .filter(item => {
+      const cardItem = isCardHistoryItem(item);
+      if (transactionFilter === "card") return cardItem;
+      if (transactionFilter === "income") return !cardItem && item.type === "income";
+      if (transactionFilter === "expense") return !cardItem && item.type === "expense";
+      return true;
+    })
     .filter(item => {
       if (!search) return true;
-      const searchable = [item.name, item.category, item.paymentMethod, item.account, item.cardName, statusLabel(item)]
+      const searchable = [
+        item.name,
+        item.category,
+        item.paymentMethod,
+        item.account,
+        item.cardName,
+        transactionHistoryStatus(item).label,
+        transactionPeriodicity(item),
+        String(Number(item.amount || 0)),
+        Number(item.amount || 0).toFixed(2),
+        money(item.amount),
+        item.dueDate,
+        formatDate(item.dueDate, true),
+        item.paidDate,
+        item.paidDate ? formatDate(item.paidDate, true) : "",
+        transactionMovementDateTime(item)
+      ]
         .filter(Boolean)
         .join(" ")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
         .toLocaleLowerCase("pt-BR");
       return searchable.includes(search);
     })
     .sort(compareTransactionsNewestFirst);
 }
 
+function transactionHistoryItems() {
+  const regularItems = userTransactions().filter(item => item.source !== "card-installment");
+  const cardItems = userCardPurchases().map(purchase => {
+    const card = userCards().find(item => item.id === purchase.cardId);
+    const current = installmentInfo(purchase);
+    const next = nextPendingInstallment(purchase);
+    const installmentNumber = current.active ? current.current : (next?.number || purchase.installments);
+    const dueDate = installmentDueDate(purchase, installmentNumber);
+    const installmentKey = `${monthKey(dueDate)}-${installmentNumber}`;
+    const paid = (purchase.paidInstallments || []).includes(installmentKey);
+    const payment = purchase.installmentPayments?.[installmentKey] || {};
+    return {
+      id: `${purchase.id}-${installmentKey}`,
+      source: "card-installment-virtual",
+      sourcePurchaseId: purchase.id,
+      sourceInstallment: installmentKey,
+      name: purchase.name,
+      amount: Number(purchase.amount || 0) / Number(purchase.installments || 1),
+      type: "expense",
+      repeat: "none",
+      dueDate,
+      paidDate: payment.paidDate || "",
+      paidTime: payment.paidTime || "",
+      paymentMethod: payment.paymentMethod || "",
+      status: paid ? "paid" : "pending",
+      category: purchase.category || "Outros",
+      account: card?.name || "Cartão",
+      cardName: card?.name || "Cartão"
+    };
+  });
+  return [...regularItems, ...cardItems];
+}
+
 function transactionHistoryRows(items) {
-  if (!items.length) return `<div class="empty">Nenhuma movimentação encontrada.</div>`;
-  return items.map(item => `
-    <article class="transaction history-transaction ${item.type}">
-      <div class="transaction-icon">${categoryIconSvg(item)}</div>
+  if (!items.length) {
+    const filtered = transactionFilter !== "all" || transactionSearch.trim();
+    return `<div class="empty transaction-history-empty">${filtered ? "Nenhuma transação encontrada para este filtro." : "Nenhuma transação encontrada."}</div>`;
+  }
+  return groupHistoryTransactions(items).map(group => `
+    <section class="transaction-month-group">
+      <h2>${escapeHtml(transactionMonthLabel(group.key))}</h2>
+      <div class="transaction-month-list">${group.items.map(transactionHistoryCard).join("")}</div>
+    </section>`).join("");
+}
+
+function normalizeTransactionSearch(value) {
+  return String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+}
+
+function isCardHistoryItem(item) {
+  return Boolean(item.sourcePurchaseId || item.type === "card" || item.source === "card-installment" || item.source === "card-installment-virtual");
+}
+
+function transactionPeriodicity(item) {
+  return item.repeat === "fixed" ? "Mensal" : item.repeat === "none" || !item.repeat ? "Não repete" : String(item.repeat);
+}
+
+function groupHistoryTransactions(items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const date = transactionSortValue(item).trim().split(" ")[0] || item.dueDate || "";
+    const key = /^\d{4}-\d{2}/.test(date) ? date.slice(0, 7) : "unknown";
+    groups.set(key, [...(groups.get(key) || []), item]);
+  });
+  return [...groups.entries()].map(([key, entries]) => ({ key, items: entries.sort(compareTransactionsNewestFirst) }));
+}
+
+function transactionMonthLabel(key) {
+  if (key === "unknown") return "Sem data";
+  const [year, month] = key.split("-").map(Number);
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function transactionHistoryCard(item) {
+  return isCardHistoryItem(item) ? cardHistoryTransaction(item) : regularHistoryTransaction(item);
+}
+
+function regularHistoryTransaction(item) {
+  const status = transactionHistoryStatus(item);
+  return `
+    <article class="transaction history-transaction ${item.type} status-${status.className}">
+      <div class="transaction-icon">${categoryIconSvg(item.category || "Outros")}</div>
       <div class="history-transaction-main">
         <h3>${escapeHtml(item.name)}</h3>
         <time>${transactionMovementDateTime(item)}</time>
-        <p>${escapeHtml(item.category || "Outros")} · ${item.repeat === "fixed" ? "Mensal" : "Não repete"}</p>
+        <p>${escapeHtml(item.category || "Outros")} · ${escapeHtml(transactionPeriodicity(item))}</p>
         <small>${transactionPaymentOrigin(item)}</small>
       </div>
       <div class="transaction-value">
-        <strong class="${item.type === "income" ? "positive" : "negative"}">${item.type === "income" ? "+" : "-"}${money(item.amount)}</strong>
-        <span class="status ${isPaidStatus(item) ? "" : "pending"}">${statusLabel(item)}</span>
+        <strong class="${item.type === "income" ? "history-income-value" : "history-expense-value"}">${item.type === "income" ? "+" : "-"} ${money(item.amount)}</strong>
+        <span class="status ${status.className}">${status.label}</span>
       </div>
-      ${transactionActionButtons(item)}
-    </article>`).join("");
+      ${transactionHistoryActions(item)}
+    </article>`;
+}
+
+function cardHistoryTransaction(item) {
+  const purchase = item.sourcePurchaseId ? userCardPurchases(item.ownerId || session).find(entry => entry.id === item.sourcePurchaseId) : null;
+  const card = purchase ? userCards(item.ownerId || session).find(entry => entry.id === purchase.cardId) : null;
+  const installmentNumber = Number(String(item.sourceInstallment || "").split("-").pop()) || 1;
+  const installments = Number(purchase?.installments || 1);
+  const status = transactionHistoryStatus(item);
+  return `
+    <article class="transaction history-transaction card-history-transaction status-${status.className}">
+      <div class="transaction-icon">${categoryIconSvg(item.category || purchase?.category || "Outros")}</div>
+      <div class="history-transaction-main">
+        <span class="card-history-name">${escapeHtml(item.cardName || card?.name || item.account || "Cartão")}</span>
+        <h3>${escapeHtml(purchase?.name || item.name)}</h3>
+        <time>${transactionMovementDateTime(item)}</time>
+        <p>${escapeHtml(item.category || purchase?.category || "Outros")} · Parcela ${installmentNumber}/${installments}</p>
+        <small>${transactionPaymentOrigin(item)}</small>
+      </div>
+      <div class="transaction-value">
+        <strong class="history-expense-value">- ${money(item.amount)}</strong>
+        <span class="status ${status.className}">${status.label}</span>
+      </div>
+      ${transactionHistoryActions(item)}
+    </article>`;
+}
+
+function transactionHistoryStatus(item) {
+  if (isPaidStatus(item)) return { label: item.type === "income" ? "Recebido" : "Pago", className: "paid" };
+  if (item.dueDate && item.dueDate < dateOffset()) return { label: "Atrasado", className: "overdue" };
+  return { label: item.type === "income" ? "A receber" : "Não pago", className: "pending" };
+}
+
+function transactionHistoryActions(item) {
+  const cardItem = isCardHistoryItem(item);
+  let actions = "";
+  if (cardItem && item.sourcePurchaseId) {
+    actions = `<button type="button" data-view-installments="${escapeAttribute(item.sourcePurchaseId)}">Ver parcelas</button><button type="button" data-edit-purchase="${escapeAttribute(item.sourcePurchaseId)}">Editar compra</button><button type="button" class="danger" data-delete-purchase="${escapeAttribute(item.sourcePurchaseId)}">Excluir compra</button>`;
+  } else {
+    actions = `${!isPaidStatus(item) ? `<button type="button" data-pay-transaction="${escapeAttribute(item.id)}">${item.type === "income" ? "Marcar como recebido" : "Marcar como pago"}</button>` : ""}<button type="button" data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button type="button" class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button>`;
+  }
+  return `<details class="receivable-options transaction-options"><summary aria-label="Mais opções de ${escapeAttribute(item.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div>${actions}</div></details>`;
 }
 
 function transactionMovementDateTime(item) {
@@ -2921,7 +3064,18 @@ function compareTransactionsNewestFirst(a, b) {
 }
 
 function filterButton(value, label) {
-  return `<button class="filter ${transactionFilter === value ? "active" : ""}" data-filter="${value}">${label}</button>`;
+  return `<button type="button" class="${transactionFilter === value ? "active" : ""}" data-filter="${value}">${transactionFilterIconSvg(value)}<span>${label}</span></button>`;
+}
+
+function transactionFilterIconSvg(value) {
+  const paths = value === "income"
+    ? `<circle cx="12" cy="12" r="8"/><path d="m8.5 13.5 3.5-3.5 3.5 3.5M12 10v7"/>`
+    : value === "expense"
+      ? `<circle cx="12" cy="12" r="8"/><path d="m8.5 10.5 3.5 3.5 3.5-3.5M12 7v7"/>`
+      : value === "card"
+        ? `<rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 10h18M7 15h4"/>`
+        : `<path d="M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z"/>`;
+  return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 }
 
 function cardTemplate() {
@@ -3805,8 +3959,13 @@ function bindAppEvents() {
   });
   document.querySelector("[data-transaction-search]")?.addEventListener("input", event => {
     transactionSearch = event.currentTarget.value;
-    const results = document.querySelector("[data-transaction-results]");
-    if (results) results.innerHTML = transactionHistoryRows(filteredHistoryTransactions());
+    clearTimeout(bindAppEvents.transactionSearchTimer);
+    bindAppEvents.transactionSearchTimer = setTimeout(() => {
+      render();
+      const input = document.querySelector("[data-transaction-search]");
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+    }, 120);
   });
   document.querySelectorAll("[data-edit-transaction]").forEach(button => button.addEventListener("click", () => editTransaction(button.dataset.editTransaction)));
   document.querySelectorAll("[data-delete-transaction]").forEach(button => button.addEventListener("click", () => deleteTransaction(button.dataset.deleteTransaction)));
