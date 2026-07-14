@@ -3184,9 +3184,14 @@ function cardTemplate() {
       </button>
       <article class="cards-overview-card">
         <header><span>Visão geral dos cartões</span><b>${cards.length} cartão${cards.length === 1 ? "" : "ões"}</b></header>
-        <div class="cards-overview-total"><small>Limite total</small><strong>${money(limit)}</strong></div>
-        <div class="cards-overview-grid"><div><span>Utilizado</span><b>${money(usedLimit)}</b></div><div><span>Disponível</span><b>${money(availableLimit)}</b></div></div>
-        <div class="cards-overview-progress" aria-label="${usage.toFixed(0)}% do limite utilizado"><i style="width:${usage}%"></i></div>
+        <div class="cards-overview-body">
+          <i class="cards-overview-icon" aria-hidden="true"><svg viewBox="0 0 48 48"><rect x="7" y="12" width="34" height="24" rx="4"/><path d="M7 20h34M14 29h7"/></svg></i>
+          <div class="cards-overview-content">
+            <div class="cards-overview-total"><small>Limite total</small><strong>${money(limit)}</strong></div>
+            <div class="cards-overview-grid"><div><span>Utilizado</span><b>${money(usedLimit)}</b></div><div><span>Disponível</span><b>${money(availableLimit)}</b></div></div>
+          </div>
+        </div>
+        <div class="cards-overview-progress" aria-label="${usage.toFixed(0)}% do limite utilizado"><span><i style="width:${usage}%"></i></span><b>${usage.toFixed(0)}%</b></div>
       </article>
       <div class="cards-section-heading"><h2>Cartões cadastrados</h2><span>${cards.length}</span></div>
       <div class="registered-card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>
@@ -3314,18 +3319,28 @@ function cardRow(card) {
   const invoice = currentInvoice(card.id);
   const pendingPurchases = userCardPurchases().filter(purchase => purchase.cardId === card.id && purchaseHasOpenInstallment(purchase)).length;
   const dueDate = cardInvoiceDueDate(card);
-  const overdueDays = invoice > 0 ? Math.max(Math.floor((new Date(`${dateOffset()}T12:00:00`) - new Date(`${dueDate}T12:00:00`)) / 86400000), 0) : 0;
+  const dueDifference = Math.round((new Date(`${dueDate}T12:00:00`) - new Date(`${dateOffset()}T12:00:00`)) / 86400000);
+  const overdueDays = invoice > 0 ? Math.max(-dueDifference, 0) : 0;
   const overdue = invoice > 0 && overdueDays > 0;
   const accent = cardAccentClass(card);
-  const pendingLabel = invoice > 0 ? `${pendingPurchases} compra${pendingPurchases === 1 ? "" : "s"} pendente${pendingPurchases === 1 ? "" : "s"}` : "Nenhuma compra pendente";
+  const pendingLabel = pendingPurchases > 0 ? `${pendingPurchases} compra${pendingPurchases === 1 ? "" : "s"} pendente${pendingPurchases === 1 ? "" : "s"}` : "Nenhuma compra pendente";
+  const invoiceStatus = invoice <= 0
+    ? "Tudo em dia"
+    : overdue
+      ? `Atrasado ${overdueDays} dia${overdueDays === 1 ? "" : "s"}`
+      : dueDifference === 0
+        ? "Vence hoje"
+        : `Vence em ${dueDifference} dia${dueDifference === 1 ? "" : "s"}`;
   return `
-    <article class="registered-card ${overdue ? "overdue" : ""}">
-      <header><i class="card-brand-accent ${accent}" aria-hidden="true"></i><div><h3>${escapeHtml(card.name)}</h3><span>Fechamento: Dia ${card.closingDay} · Vencimento: Dia ${card.dueDay}</span></div></header>
-      <p class="registered-card-pending">${pendingLabel}</p>
-      ${invoice > 0 ? `<div class="registered-card-invoice"><div><span>${overdue ? "Fatura em atraso" : "Fatura aberta"}</span><small>${overdue ? `Atrasado ${overdueDays} dia${overdueDays === 1 ? "" : "s"}` : `Vencimento: ${formatDate(dueDate, true)}`}</small></div><strong>${money(invoice)}</strong></div>` : ""}
+    <article class="registered-card ${accent} ${overdue ? "overdue" : ""}">
+      <div class="registered-card-main">
+        <header><i class="card-brand-accent ${accent}" aria-hidden="true"></i><div><h3>${escapeHtml(card.name)}</h3><span>Fechamento: Dia ${card.closingDay} <b>•</b> Vencimento: Dia ${card.dueDay}</span></div></header>
+        <div class="registered-card-invoice"><span>${overdue ? "Fatura em atraso" : "Fatura atual"}</span><strong>${money(invoice)}</strong><small>${invoiceStatus}</small></div>
+      </div>
+      <p class="registered-card-pending"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 4h2l1.4 8h8.2l1.6-5.5H5.1M7 16h.1M14 16h.1"/></svg><span>${pendingLabel}</span></p>
       <div class="registered-card-actions">
-        <button type="button" data-open-card-purchases="${escapeAttribute(card.id)}">Ver Compras</button>
-        ${invoice > 0 ? `<button type="button" class="pay-invoice" data-pay-invoice="${escapeAttribute(card.id)}">Pagar Fatura</button>` : ""}
+        <button type="button" data-open-card-purchases="${escapeAttribute(card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7V5.5a5 5 0 0 1 10 0V7M3 7h14l-1 10H4L3 7Z"/></svg><span>Ver Compras</span></button>
+        ${invoice > 0 ? `<button type="button" class="pay-invoice" data-pay-invoice="${escapeAttribute(card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M2.5 8h15M6 12h3"/></svg><span>Pagar Fatura</span></button>` : ""}
         <details class="receivable-options card-options"><summary aria-label="Mais opções de ${escapeAttribute(card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(card.id)}">Excluir</button></div></details>
       </div>
     </article>`;
