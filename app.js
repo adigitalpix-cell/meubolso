@@ -74,6 +74,7 @@ let transactionSearch = "";
 let transactionStatusFilter = "all";
 let transactionPeriodFilter = "all";
 let transactionsReturnView = "home";
+let cardsReturnView = "home";
 let editingTransactionId = null;
 let editingUserId = null;
 let userFormOpen = false;
@@ -1550,6 +1551,24 @@ function openTransactionsRoot() {
 
 function closeTransactionsView() {
   const target = transactionsReturnView && transactionsReturnView !== "transactions" && canAccessView(transactionsReturnView) ? transactionsReturnView : "home";
+  currentView = target;
+  render();
+}
+
+function openCardsRoot() {
+  if (!["card", "cardPurchases", "purchaseEditor", "installments"].includes(currentView)) cardsReturnView = currentView;
+  document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
+  document.querySelectorAll(".receivable-options[open], .category-options[open]").forEach(menu => { menu.open = false; });
+  editingCardId = null;
+  editingPurchaseId = null;
+  selectedPurchaseId = null;
+  purchaseFormOpen = false;
+  currentView = "card";
+  render();
+}
+
+function closeCardsView() {
+  const target = cardsReturnView && cardsReturnView !== "card" && canAccessView(cardsReturnView) ? cardsReturnView : "home";
   currentView = target;
   render();
 }
@@ -3156,20 +3175,22 @@ function cardTemplate() {
   const limit = totalCardLimit();
   const usedLimit = pendingPurchaseTotal();
   const availableLimit = availableCardLimit();
+  const usage = limit ? Math.min(usedLimit / limit * 100, 100) : 0;
   return `
-    <div class="page-title"><span class="eyebrow">Cartões de crédito</span><h1>Meus Cartões</h1><p>Cadastre cartões e lance compras separadamente.</p></div>
-    <article class="credit-card">
-      <header><small>Limite total dos cartões</small><strong>${cards.length} cartão${cards.length === 1 ? "" : "ões"}</strong></header>
-      <h2>${money(limit)}</h2>
-      <div class="card-limit-grid three">
-        <span>Total <b>${money(limit)}</b></span>
-        <span>Utilizado <b>${money(usedLimit)}</b></span>
-        <span>Disponível <b>${money(availableLimit)}</b></span>
-      </div>
-      <div class="card-progress"><i style="width:${limit ? Math.min(usedLimit / limit * 100, 100) : 0}%"></i></div>
-    </article>
-    <div class="section-header"><h2>Cartões cadastrados</h2><span class="list-count">${cards.length}</span></div>
-    <div class="card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>`;
+    <section class="cards-page">
+      <button class="receivables-back-header" data-close-cards aria-label="Voltar para a tela anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Meus Cartões</strong><small>Gerencie limites, compras e faturas.</small></span>
+      </button>
+      <article class="cards-overview-card">
+        <header><span>Visão geral dos cartões</span><b>${cards.length} cartão${cards.length === 1 ? "" : "ões"}</b></header>
+        <div class="cards-overview-total"><small>Limite total</small><strong>${money(limit)}</strong></div>
+        <div class="cards-overview-grid"><div><span>Utilizado</span><b>${money(usedLimit)}</b></div><div><span>Disponível</span><b>${money(availableLimit)}</b></div></div>
+        <div class="cards-overview-progress" aria-label="${usage.toFixed(0)}% do limite utilizado"><i style="width:${usage}%"></i></div>
+      </article>
+      <div class="cards-section-heading"><h2>Cartões cadastrados</h2><span>${cards.length}</span></div>
+      <div class="registered-card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>
+    </section>`;
 }
 
 function cardPurchasesTemplate() {
@@ -3291,18 +3312,38 @@ function purchaseFormTemplate(cards) {
 
 function cardRow(card) {
   const invoice = currentInvoice(card.id);
+  const pendingPurchases = userCardPurchases().filter(purchase => purchase.cardId === card.id && purchaseHasOpenInstallment(purchase)).length;
+  const dueDate = cardInvoiceDueDate(card);
+  const overdueDays = invoice > 0 ? Math.max(Math.floor((new Date(`${dateOffset()}T12:00:00`) - new Date(`${dueDate}T12:00:00`)) / 86400000), 0) : 0;
+  const overdue = invoice > 0 && overdueDays > 0;
+  const accent = cardAccentClass(card);
+  const pendingLabel = invoice > 0 ? `${pendingPurchases} compra${pendingPurchases === 1 ? "" : "s"} pendente${pendingPurchases === 1 ? "" : "s"}` : "Nenhuma compra pendente";
   return `
-    <article class="mini-card ${selectedCardId === card.id ? "selected" : ""}">
-      <div><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(card.brand)} · Fecha dia ${card.closingDay} · Vence dia ${card.dueDay}</span></div>
-      <b>${money(invoice)}</b>
-      <small>Limite: ${money(card.limit)} · Disponível: ${money(availableCardLimit(card.id))}</small>
-      <div class="row-actions">
-        <button type="button" data-open-card-purchases="${card.id}">Ver compras</button>
-        <button type="button" data-edit-card="${card.id}">Editar</button>
-        <button type="button" class="invoice-action" data-pay-invoice="${card.id}">Pagar Fatura</button>
-        <button type="button" class="danger" data-delete-card="${card.id}">Excluir</button>
+    <article class="registered-card ${overdue ? "overdue" : ""}">
+      <header><i class="card-brand-accent ${accent}" aria-hidden="true"></i><div><h3>${escapeHtml(card.name)}</h3><span>Fechamento: Dia ${card.closingDay} · Vencimento: Dia ${card.dueDay}</span></div></header>
+      <p class="registered-card-pending">${pendingLabel}</p>
+      ${invoice > 0 ? `<div class="registered-card-invoice"><div><span>${overdue ? "Fatura em atraso" : "Fatura aberta"}</span><small>${overdue ? `Atrasado ${overdueDays} dia${overdueDays === 1 ? "" : "s"}` : `Vencimento: ${formatDate(dueDate, true)}`}</small></div><strong>${money(invoice)}</strong></div>` : ""}
+      <div class="registered-card-actions">
+        <button type="button" data-open-card-purchases="${escapeAttribute(card.id)}">Ver Compras</button>
+        ${invoice > 0 ? `<button type="button" class="pay-invoice" data-pay-invoice="${escapeAttribute(card.id)}">Pagar Fatura</button>` : ""}
+        <details class="receivable-options card-options"><summary aria-label="Mais opções de ${escapeAttribute(card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(card.id)}">Excluir</button></div></details>
       </div>
     </article>`;
+}
+
+function cardInvoiceDueDate(card) {
+  const today = new Date(`${dateOffset()}T12:00:00`);
+  return localDateKey(new Date(today.getFullYear(), today.getMonth(), Math.min(Number(card.dueDay || 1), daysInMonth(today.getFullYear(), today.getMonth())), 12));
+}
+
+function cardAccentClass(card) {
+  const key = `${card.name || ""} ${card.brand || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+  if (key.includes("nubank")) return "nubank";
+  if (key.includes("inter")) return "inter";
+  if (key.includes("itau")) return "itau";
+  if (key.includes("mercado pago")) return "mercado-pago";
+  if (key.includes("caixa")) return "caixa";
+  return "default";
 }
 
 function purchaseRow(purchase) {
@@ -3880,7 +3921,12 @@ function bindAppEvents() {
       openTransactionsRoot();
       return;
     }
+    if (button.dataset.navView === "card") {
+      openCardsRoot();
+      return;
+    }
     if (target === "transactions" && currentView !== "transactions") transactionsReturnView = currentView;
+    if (target === "card" && !["card", "cardPurchases", "purchaseEditor", "installments"].includes(currentView)) cardsReturnView = currentView;
     if (target === "users") userListScope = "all";
     if (target === "home" && !isMaster()) {
       try {
@@ -3922,6 +3968,7 @@ function bindAppEvents() {
     render();
   });
   document.querySelector("[data-close-transactions]")?.addEventListener("click", closeTransactionsView);
+  document.querySelector("[data-close-cards]")?.addEventListener("click", closeCardsView);
   document.querySelectorAll("[data-add], [data-add-type]").forEach(button => button.addEventListener("click", () => {
     if (isMaster()) return showToast("Apenas usuários podem cadastrar movimentações.");
     if (currentView === "card") {
@@ -4099,6 +4146,9 @@ function bindAppEvents() {
   }));
   document.querySelectorAll("[data-edit-card]").forEach(button => button.addEventListener("click", () => {
     openCardDialog(button.dataset.editCard);
+  }));
+  document.querySelectorAll("[data-adjust-card-limit]").forEach(button => button.addEventListener("click", () => {
+    openCardDialog(button.dataset.adjustCardLimit, "limit");
   }));
   document.querySelectorAll("[data-delete-card]").forEach(button => button.addEventListener("click", () => deleteCard(button.dataset.deleteCard)));
   document.querySelectorAll("[data-edit-purchase]").forEach(button => button.addEventListener("click", () => {
@@ -4799,15 +4849,16 @@ function openTransactionDialog(type = "expense") {
   dialog.showModal();
 }
 
-function openCardDialog(cardId = null) {
+function openCardDialog(cardId = null, mode = "edit") {
   editingCardId = cardId;
   const dialog = document.querySelector("#card-dialog");
   const title = document.querySelector("#card-form-title");
   const body = document.querySelector("#card-form-body");
   if (!dialog || !title || !body) return;
-  title.textContent = cardId ? "Editar cartão" : "Novo cartão";
+  title.textContent = cardId ? (mode === "limit" ? "Ajustar limite" : "Editar cartão") : "Novo cartão";
   body.innerHTML = cardFormTemplate();
   dialog.showModal();
+  if (mode === "limit") document.querySelector("#card-form [name='limit']")?.focus();
 }
 
 function closeCardDialog() {
@@ -5616,27 +5667,22 @@ async function payOverdueCardGroup(cardId) {
   render();
 }
 
-async function payCardInvoice(cardId, options = {}) {
+async function payCardInvoice(cardId) {
   if (isMaster()) return;
   const pending = userCardPurchases().filter(purchase => purchase.cardId === cardId).map(purchase => ({ purchase, info: installmentInfo(purchase) })).filter(item => item.info.active && !item.info.paid);
   const total = pending.reduce((sum, item) => sum + item.info.value, 0);
   if (!pending.length || total <= 0) return showToast("Não há fatura pendente para este cartão.");
   const card = userCards().find(item => item.id === cardId);
-  let paymentMethod = "Cartão";
-  if (options.fromNotification) {
-    const now = new Date(`${dateOffset()}T12:00:00`);
-    const dueDate = localDateKey(new Date(now.getFullYear(), now.getMonth(), Math.min(Number(card?.dueDay || 1), daysInMonth(now.getFullYear(), now.getMonth())), 12));
-    paymentMethod = await requestPaymentMethod({
-      type: "expense",
-      name: `Fatura do cartão ${card?.name || "Cartão"}`,
-      amount: total,
-      dueDate
-    }, {
-      eyebrow: "Confirmar pagamento",
-      title: "Confirmar pagamento da fatura"
-    });
-    if (!paymentMethod) return;
-  } else if (!await confirmInvoicePayment(total)) return;
+  const paymentMethod = await requestPaymentMethod({
+    type: "expense",
+    name: `Fatura do cartão ${card?.name || "Cartão"}`,
+    amount: total,
+    dueDate: cardInvoiceDueDate(card || {})
+  }, {
+    eyebrow: "Confirmar pagamento",
+    title: "Confirmar pagamento da fatura"
+  });
+  if (!paymentMethod) return;
   const paidAt = nowParts();
   const account = card?.name || "Cartão";
   pending.forEach(({ purchase, info }) => {
