@@ -152,6 +152,29 @@
     </form>
   </dialog>
 
+  <dialog id="installment-date-dialog" class="sheet installment-date-dialog">
+    <form id="installment-date-form">
+      <div class="sheet-handle"></div>
+      <header class="sheet-header">
+        <div>
+          <span class="eyebrow">Ajuste temporário de teste</span>
+          <h2>Editar vencimento da parcela</h2>
+        </div>
+        <button class="icon-button" type="button" data-cancel-installment-date aria-label="Fechar">×</button>
+      </header>
+      <div class="installment-date-summary">
+        <strong id="installment-date-purchase-name"></strong>
+        <span id="installment-date-number"></span>
+        <small>Data atual: <b id="installment-date-current"></b></small>
+      </div>
+      <label class="field"><span>Nova data de vencimento</span><input name="newDueDate" type="date" required></label>
+      <div class="confirm-actions">
+        <button type="button" class="secondary-button" data-cancel-installment-date>Cancelar</button>
+        <button type="submit" class="primary-button">Salvar nova data</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="card-dialog" class="sheet card-sheet">
     <form id="card-form" method="dialog">
       <div class="sheet-handle"></div>

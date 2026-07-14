@@ -92,6 +92,7 @@ let selectedCardId = null;
 let editingCardId = null;
 let editingPurchaseId = null;
 let selectedPurchaseId = null;
+let editingInstallmentDate = null;
 let dashboardDetail = null;
 let receivablesReturnView = "home";
 let receivedIncomeReturnView = "home";
@@ -159,6 +160,9 @@ function normalizeDatabase(data = structuredClone(seed)) {
     data.accounts[user.id] ||= [...DEFAULT_ACCOUNTS];
     data.cardPurchases[user.id].forEach(purchase => {
       purchase.paidInstallments ||= [];
+      purchase.installmentPayments ||= {};
+      purchase.installmentIds ||= {};
+      purchase.installmentDueDates ||= {};
     });
   });
   return data;
@@ -665,7 +669,11 @@ function fromSupabaseRows(rows) {
   rows.compras.forEach(row => {
     const paidInstallments = [];
     const installmentPayments = {};
+    const installmentIds = {};
+    const installmentDueDates = {};
     (parcelasPorCompra[row.id] || []).forEach(parcela => {
+      installmentIds[parcela.numero] = parcela.id;
+      installmentDueDates[parcela.numero] = parcela.data_vencimento;
       const key = `${monthKey(parcela.data_vencimento)}-${parcela.numero}`;
       if (parcela.status === "pago") {
         paidInstallments.push(key);
@@ -687,7 +695,9 @@ function fromSupabaseRows(rows) {
       category: row.categoria,
       closed: row.status === "fechado",
       paidInstallments,
-      installmentPayments
+      installmentPayments,
+      installmentIds,
+      installmentDueDates
     });
   });
   rows.suporte.forEach(row => data.supportTickets.push({
@@ -817,7 +827,7 @@ function toSupabaseRows(data) {
         const paid = (purchase.paidInstallments || []).includes(key);
         const payment = purchase.installmentPayments?.[key] || {};
         parcelas.push({
-          id: crypto.randomUUID(),
+          id: purchase.installmentIds?.[numero] || crypto.randomUUID(),
           usuario_id: userId,
           compra_cartao_id: purchase.id,
           numero,
@@ -1119,7 +1129,7 @@ function purchaseInstallmentRows(purchase, userId = session) {
     const paid = (purchase.paidInstallments || []).includes(key);
     const payment = purchase.installmentPayments?.[key] || {};
     return {
-      id: crypto.randomUUID(),
+      id: purchase.installmentIds?.[numero] || crypto.randomUUID(),
       usuario_id: userId,
       compra_cartao_id: purchase.id,
       numero,
@@ -3393,16 +3403,20 @@ function installmentRow(purchase, installmentNumber) {
   const payment = purchase.installmentPayments?.[key];
   const overdue = !paid && dueDate < dateOffset();
   const status = paid ? "Pago" : overdue ? "Atrasado" : "Pendente";
+  const installmentId = purchase.installmentIds?.[installmentNumber] || "";
+  const canEditDate = canEditTestInstallmentDates() && !paid && installmentId;
   return `
     <article class="purchase-row ${paid ? "paid" : overdue ? "overdue" : ""}">
       <div><strong>${formatDate(dueDate, true)} - ${status}</strong><span>Parcela ${installmentNumber}/${purchase.installments}</span></div>
       <b>${money(purchase.amount / purchase.installments)}</b>
       ${payment ? `<small>${escapeHtml(payment.paymentMethod)} · ${escapeHtml(payment.account)} · ${formatDate(payment.paidDate, true)} · ${escapeHtml(payment.paidTime)}</small>` : ""}
-      ${!paid ? `<button type="button" data-pay-installment="${purchase.id}" data-installment-key="${key}">Marcar como paga</button>` : ""}
+      ${!paid ? `<div class="installment-row-actions"><button type="button" data-pay-installment="${purchase.id}" data-installment-key="${key}">Marcar como paga</button>${canEditDate ? `<button type="button" class="edit-installment-date-button" data-edit-installment-date="${escapeAttribute(purchase.id)}" data-installment-number="${installmentNumber}" data-installment-id="${escapeAttribute(installmentId)}">Editar data</button>` : ""}</div>` : ""}
     </article>`;
 }
 
 function installmentDueDate(purchase, installmentNumber) {
+  const override = purchase.installmentDueDates?.[installmentNumber];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(override || "")) return override;
   const date = new Date(`${purchase.purchaseDate}T12:00:00`);
   date.setMonth(date.getMonth() + installmentNumber - 1);
   return localDateKey(date);
@@ -4153,6 +4167,15 @@ function bindAppEvents() {
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
+  document.querySelectorAll("[data-edit-installment-date]").forEach(button => button.addEventListener("click", () => openInstallmentDateDialog(
+    button.dataset.editInstallmentDate,
+    Number(button.dataset.installmentNumber),
+    button.dataset.installmentId
+  )));
+  document.querySelector("#installment-date-form")?.addEventListener("submit", saveInstallmentDate);
+  document.querySelectorAll("[data-cancel-installment-date]").forEach(button => button.addEventListener("click", closeInstallmentDateDialog));
+  const installmentDateDialog = document.querySelector("#installment-date-dialog");
+  if (installmentDateDialog) installmentDateDialog.oncancel = () => { editingInstallmentDate = null; };
   document.querySelectorAll("[data-pay-invoice]").forEach(button => button.addEventListener("click", event => payCardInvoice(event.currentTarget.dataset.payInvoice)));
   document.querySelectorAll("[data-open-card-purchases]").forEach(button => button.addEventListener("click", () => {
     selectedCardId = button.dataset.openCardPurchases;
@@ -4881,6 +4904,74 @@ function closeCardDialog() {
   editingCardId = null;
 }
 
+function canEditTestInstallmentDates() {
+  const user = currentUser();
+  return Boolean(user && user.id === session && user.role === "user" && String(user.username || "").trim().toLocaleLowerCase("pt-BR") === "teste");
+}
+
+function openInstallmentDateDialog(purchaseId, installmentNumber, installmentId) {
+  if (!canEditTestInstallmentDates()) return showToast("Acesso não autorizado.");
+  const purchase = userCardPurchases().find(item => item.id === purchaseId);
+  const realInstallmentId = purchase?.installmentIds?.[installmentNumber];
+  if (!purchase || !realInstallmentId || realInstallmentId !== installmentId) return showToast("Parcela não encontrada.");
+  const dueDate = installmentDueDate(purchase, installmentNumber);
+  const key = `${monthKey(dueDate)}-${installmentNumber}`;
+  if ((purchase.paidInstallments || []).includes(key)) return showToast("Não é possível alterar o vencimento de uma parcela paga.");
+  const dialog = document.querySelector("#installment-date-dialog");
+  const form = document.querySelector("#installment-date-form");
+  if (!dialog || !form) return;
+  editingInstallmentDate = { purchaseId, installmentNumber, installmentId, currentDueDate: dueDate };
+  document.querySelector("#installment-date-purchase-name").textContent = purchase.name;
+  document.querySelector("#installment-date-number").textContent = `Parcela ${installmentNumber}/${purchase.installments}`;
+  document.querySelector("#installment-date-current").textContent = formatDate(dueDate, true);
+  form.elements.newDueDate.value = dueDate;
+  dialog.showModal();
+}
+
+function closeInstallmentDateDialog() {
+  document.querySelector("#installment-date-dialog")?.close();
+  editingInstallmentDate = null;
+}
+
+async function saveInstallmentDate(event) {
+  event.preventDefault();
+  if (!canEditTestInstallmentDates() || !editingInstallmentDate) return showToast("Acesso não autorizado.");
+  if (!navigator.onLine) return showToast("Conecte-se à internet para salvar a nova data no Supabase.");
+  const user = currentUser();
+  const { purchaseId, installmentNumber, installmentId } = editingInstallmentDate;
+  const purchase = userCardPurchases().find(item => item.id === purchaseId);
+  if (!purchase || purchase.installmentIds?.[installmentNumber] !== installmentId) return showToast("Parcela não encontrada.");
+  const currentDueDate = installmentDueDate(purchase, installmentNumber);
+  const currentKey = `${monthKey(currentDueDate)}-${installmentNumber}`;
+  if ((purchase.paidInstallments || []).includes(currentKey)) return showToast("Não é possível alterar o vencimento de uma parcela paga.");
+  const newDueDate = new FormData(event.currentTarget).get("newDueDate");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDueDate || "")) return showToast("Informe uma data válida.");
+  if (newDueDate === currentDueDate) return closeInstallmentDateDialog();
+  try {
+    await supabaseRequest("rpc/editar_vencimento_parcela_teste", {
+      method: "POST",
+      body: {
+        p_parcela_id: installmentId,
+        p_usuario_id: user.id,
+        p_senha: user.password,
+        p_nova_data: newDueDate
+      },
+      prefer: "return=representation"
+    });
+    purchase.installmentDueDates ||= {};
+    purchase.installmentDueDates[installmentNumber] = newDueDate;
+    cacheDatabase();
+    closeInstallmentDateDialog();
+    if (navigator.onLine) await refreshUserFinancialData();
+  } catch (error) {
+    console.error("[MEU BOLSO][Supabase] erro ao editar vencimento da parcela", error);
+    return showToast("Não foi possível salvar a nova data no Supabase.");
+  }
+  logActivity(`Alterou o vencimento da parcela ${installmentNumber}/${purchase.installments} de ${purchase.name} para ${formatDate(newDueDate, true)}.`);
+  showToast("Vencimento atualizado com sucesso.");
+  render();
+}
+
 function editTransaction(transactionId) {
   if (isMaster()) return;
   const item = userTransactions().find(transaction => transaction.id === transactionId);
@@ -5432,9 +5523,8 @@ async function saveCardPurchase(event) {
 
 function allInstallmentKeys(purchase) {
   return Array.from({ length: purchase.installments }, (_, index) => {
-    const date = new Date(`${purchase.purchaseDate}T12:00:00`);
-    date.setMonth(date.getMonth() + index);
-    return `${monthKey(localDateKey(date))}-${index + 1}`;
+    const installmentNumber = index + 1;
+    return `${monthKey(installmentDueDate(purchase, installmentNumber))}-${installmentNumber}`;
   });
 }
 

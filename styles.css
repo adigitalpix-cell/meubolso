@@ -437,6 +437,19 @@ button { cursor: pointer; }
 .row-actions button { min-height: 32px; border: 0; border-radius: 9px; color: var(--green); background: var(--green-soft); font-size: 9px; font-weight: 800; }
 .row-actions button.invoice-action { color: var(--card-blue); background: var(--card-blue-soft); }
 .row-actions button.danger { color: var(--red); background: var(--red-soft); }
+.installment-row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
+.installment-row-actions button { min-height: 32px; padding: 6px 8px; }
+.installment-row-actions .edit-installment-date-button { border: 1px solid #cfe3d9; color: #155d44; background: #f3f8f5; }
+.installment-date-dialog form { display: grid; gap: 14px; }
+.installment-date-summary { padding: 12px; display: grid; gap: 4px; border: 1px solid #d8e8df; border-radius: 14px; background: linear-gradient(135deg,#f2faf5,#eaf5ef); }
+.installment-date-summary strong { color: var(--green-dark); font-size: 14px; }
+.installment-date-summary span { color: #26644f; font-size: 11px; font-weight: 850; }
+.installment-date-summary small { color: var(--muted); font-size: 10px; }
+.installment-date-summary small b { color: var(--green); }
+.installment-date-dialog .confirm-actions { margin-top: 1px; }
+@media (max-width: 360px) {
+  .installment-row-actions { grid-template-columns: 1fr; }
+}
 .due-list { display: grid; gap: 8px; }
 .due-row { padding: 12px; display: grid; grid-template-columns: 1fr auto; gap: 6px; border-radius: 14px; background: white; border: 1px solid var(--line); }
 .due-row strong, .due-row span, .due-row small { display: block; }
