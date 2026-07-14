@@ -4,9 +4,9 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
-const NOTIFICATION_CENTER_KEY = "minhas-financas-notification-center";
+const ADMIN_NOTIFICATION_KEY = "meu-bolso-admin-notifications";
 const APP_NAME = "MEU BOLSO";
-const APP_UPDATED_AT = "13/07/2026";
+const APP_UPDATED_AT = "14/07/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
 const DEFAULT_CATEGORY_DEFINITIONS = [
@@ -1504,7 +1504,7 @@ function registerTemplate() {
 
 function shellTemplate() {
   const user = currentUser();
-  const unreadNotifications = notificationCenterItems().filter(item => !item.readAt).length;
+  const activeNotifications = notificationCenterItems().length;
   return `
     <section class="app-shell">
       ${currentView === "home" ? `<header class="topbar">
@@ -1512,7 +1512,7 @@ function shellTemplate() {
         <div class="topbar-greeting"><span class="eyebrow">${greeting()}</span><h1 class="hello">${escapeHtml(user.name.split(" ")[0])}</h1></div>
         <button class="notification-bell" data-view="notifications" aria-label="Abrir notificações">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.5 21h5"/></svg>
-          ${unreadNotifications ? `<span>${unreadNotifications > 9 ? "9+" : unreadNotifications}</span>` : ""}
+          ${activeNotifications ? `<span>${activeNotifications > 9 ? "9+" : activeNotifications}</span>` : ""}
         </button>
       </header>` : ""}
       ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
@@ -1636,37 +1636,26 @@ function profileFinancialDashboardTemplate() {
     ${categoryOverviewTemplate()}`;
 }
 
-function notificationCenterStorageKey() {
-  return `${NOTIFICATION_CENTER_KEY}:${session || "guest"}`;
-}
-
-function notificationCenterState() {
-  try {
-    return JSON.parse(localStorage.getItem(notificationCenterStorageKey()) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveNotificationCenterState(state) {
-  localStorage.setItem(notificationCenterStorageKey(), JSON.stringify(state));
-}
-
 function notificationCenterSources() {
   if (!session || isMaster()) return [];
   const today = dateOffset();
-  const items = userTransactions()
-    .filter(item => ["income", "expense"].includes(item.type) && !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
+  const movements = userTransactions()
+    .filter(item => ["income", "expense"].includes(item.type) && !isPaidStatus(item) && item.status !== "cancelled" && item.dueDate)
+    .filter(item => item.type === "income" || item.dueDate <= today)
     .map(item => {
       const kind = item.type === "income" ? "Receita" : "Despesa";
       const todayDue = item.dueDate === today;
+      const overdue = item.dueDate < today;
       return {
         id: `movement:${item.type}:${item.id}:${item.dueDate}`,
-        title: `${kind} ${todayDue ? "vence hoje" : "vencida"}`,
-        message: `${item.name} ${todayDue ? "vence hoje" : "está vencida"}. Valor: ${money(item.amount)}`,
+        title: item.type === "income" && !overdue && !todayDue ? "Receita a receber" : `${kind} ${todayDue ? "vence hoje" : "vencida"}`,
+        message: item.type === "income" && !overdue && !todayDue ? `${item.name} está prevista para ${formatDate(item.dueDate, true)}.` : `${item.name} ${todayDue ? "vence hoje" : "está vencida"}.`,
         date: item.dueDate,
         time: item.createdAt?.slice(11, 16) || "08:00",
-        view: "transactions"
+        amount: Number(item.amount || 0),
+        kind: "movement",
+        recordId: item.id,
+        priority: overdue ? (item.type === "expense" ? 10 : 30) : todayDue ? 40 : 50
       };
     });
 
@@ -1677,10 +1666,13 @@ function notificationCenterSources() {
       return {
         id: `installment:${item.sourcePurchaseId}:${item.sourceInstallment}`,
         title: `Parcela de cartão ${todayDue ? "vence hoje" : "vencida"}`,
-        message: `${item.name} no cartão ${item.cardName || "Cartão"}. Valor: ${money(item.amount)}`,
+        message: `${item.name} no cartão ${item.cardName || "Cartão"}.`,
         date: item.dueDate,
         time: "08:00",
-        view: "card"
+        amount: Number(item.amount || 0),
+        kind: "installment",
+        purchaseId: item.sourcePurchaseId,
+        priority: todayDue ? 40 : 20
       };
     });
 
@@ -1689,15 +1681,19 @@ function notificationCenterSources() {
     const due = new Date(now.getFullYear(), now.getMonth(), Math.min(Number(card.dueDay || 1), daysInMonth(now.getFullYear(), now.getMonth())), 12);
     const dueDate = localDateKey(due);
     const amount = currentInvoice(card.id);
-    if (!amount || dueDate > today) return [];
+    if (!amount) return [];
     const todayDue = dueDate === today;
+    const overdue = dueDate < today;
     return [{
       id: `invoice:${card.id}:${dueDate}`,
-      title: `Fatura ${todayDue ? "vence hoje" : "vencida"}`,
-      message: `A fatura do cartão ${card.name} ${todayDue ? "vence hoje" : "está vencida"}. Valor: ${money(amount)}`,
+      title: overdue ? "Fatura vencida" : todayDue ? "Fatura vence hoje" : "Fatura pendente",
+      message: `A fatura do cartão ${card.name} ${overdue ? "está vencida" : todayDue ? "vence hoje" : "está pendente"}.`,
       date: dueDate,
       time: "08:00",
-      view: "card"
+      amount: Number(amount || 0),
+      kind: "invoice",
+      cardId: card.id,
+      priority: overdue ? 25 : todayDue ? 40 : 50
     }];
   });
 
@@ -1709,48 +1705,95 @@ function notificationCenterSources() {
     message: `Seu acesso vence ${accessDays === 0 ? "hoje" : `em ${accessDays} dia${accessDays === 1 ? "" : "s"}`}.`,
     date: user.accessExpiresAt,
     time: "08:00",
-    view: "profile"
+    kind: "access",
+    view: "profile",
+    priority: 55
   }] : [];
-  return [...items, ...invoices, ...installments, ...access];
+  return [...movements, ...invoices, ...installments, ...access, ...administrativeNotificationSources()];
 }
 
-function notificationCenterItems(now = Date.now()) {
-  const state = notificationCenterState();
+function administrativeNotificationSources() {
+  let stored = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ADMIN_NOTIFICATION_KEY) || "[]");
+    stored = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    stored = [];
+  }
+  const configured = Array.isArray(window.APP_ADMIN_NOTIFICATIONS) ? window.APP_ADMIN_NOTIFICATIONS : [];
+  const unique = new Map();
+  [...stored, ...configured].forEach((item, index) => {
+    if (!item || item.active === false) return;
+    if (item.userId && item.userId !== session && item.userId !== "all") return;
+    const id = String(item.id || `admin-${index}-${item.date || dateOffset()}`);
+    unique.set(id, {
+      id: `admin:${id}`,
+      title: String(item.title || "Aviso do sistema"),
+      message: String(item.message || "Você possui uma nova informação do MEU BOLSO."),
+      date: item.date || dateOffset(),
+      time: item.time || "08:00",
+      amount: item.amount !== undefined && item.amount !== null && item.amount !== "" && Number.isFinite(Number(item.amount)) ? Number(item.amount) : null,
+      kind: "admin",
+      view: item.view || "notifications",
+      priority: 60
+    });
+  });
+  return [...unique.values()];
+}
+
+function notificationCenterItems() {
   return notificationCenterSources()
-    .map(item => ({ ...item, readAt: state[item.id]?.readAt || "" }))
-    .filter(item => !item.readAt || now - new Date(item.readAt).getTime() < 86400000)
-    .sort((a, b) => Number(Boolean(a.readAt)) - Number(Boolean(b.readAt)) || `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
-}
-
-function markNotificationRead(id) {
-  const state = notificationCenterState();
-  state[id] = { readAt: state[id]?.readAt || new Date().toISOString() };
-  saveNotificationCenterState(state);
-}
-
-function markAllNotificationsRead() {
-  const state = notificationCenterState();
-  const readAt = new Date().toISOString();
-  notificationCenterSources().forEach(item => { state[item.id] ||= { readAt }; });
-  saveNotificationCenterState(state);
+    .sort((a, b) => Number(a.priority || 99) - Number(b.priority || 99) || `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
 }
 
 function notificationsTemplate() {
   const items = notificationCenterItems();
   return `
-    <div class="notifications-header"><div class="page-title"><span class="eyebrow">Sua central</span><h1>Notificações</h1><p>Avisos importantes sobre seus vencimentos.</p></div>${items.some(item => !item.readAt) ? `<button data-read-all>Marcar todas como lidas</button>` : ""}</div>
-    <button class="secondary-button back-button" data-view="home">Voltar ao início</button>
-    <div class="notification-center-list">${items.length ? items.map(notificationCenterRow).join("") : `<div class="empty">Você não possui notificações no momento.</div>`}</div>`;
+    <section class="notifications-page">
+      <button class="receivables-back-header notifications-back-header" data-view="home" aria-label="Voltar para o início">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Notificações</strong><small>Acompanhe alertas e pendências importantes.</small></span>
+      </button>
+      <section class="notifications-hero">
+        <i aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M9.5 21h5"/></svg></i>
+        <div><span>Notificações ativas</span><p>Você possui pendências que precisam da sua atenção.</p></div>
+        <strong>${items.length}<small>${items.length === 1 ? "pendência" : "pendências"}</small></strong>
+      </section>
+      <div class="notification-center-list">${items.length ? items.map(notificationCenterRow).join("") : `<div class="notifications-empty"><strong>Nenhuma notificação ativa.</strong><span>Você não possui pendências no momento.</span></div>`}</div>
+    </section>`;
 }
 
 function notificationCenterRow(item) {
   return `
-    <button class="notification-center-item ${item.readAt ? "read" : "new"}" data-notification-id="${escapeAttribute(item.id)}" data-notification-view="${item.view}">
-      <span class="notification-state">${item.readAt ? "Lida" : "Nova"}</span>
-      <strong>${escapeHtml(item.title)}</strong>
-      <p>${escapeHtml(item.message)}</p>
-      <small>${formatDate(item.date, true)} — ${escapeHtml(item.time)}</small>
+    <button class="notification-center-item" data-notification-id="${escapeAttribute(item.id)}" data-notification-kind="${escapeAttribute(item.kind || "")}" data-notification-record="${escapeAttribute(item.recordId || "")}" data-notification-card="${escapeAttribute(item.cardId || "")}" data-notification-purchase="${escapeAttribute(item.purchaseId || "")}" data-notification-view="${escapeAttribute(item.view || "")}">
+      <span class="notification-copy"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><small><svg viewBox="0 0 18 18" aria-hidden="true"><rect x="3" y="4.5" width="12" height="10" rx="1.8"/><path d="M6 2.8v3M12 2.8v3M3 7.5h12"/></svg>${formatDate(item.date, true)} — ${escapeHtml(item.time)}</small></span>
+      ${Number.isFinite(item.amount) ? `<b>${money(item.amount)}</b>` : ""}
+      <i aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m7 4 6 6-6 6"/></svg></i>
     </button>`;
+}
+
+function openNotificationTarget(button) {
+  const kind = button.dataset.notificationKind;
+  if (kind === "movement" && button.dataset.notificationRecord) {
+    currentView = "transactions";
+    render();
+    editTransaction(button.dataset.notificationRecord);
+    return;
+  }
+  if (kind === "invoice" && button.dataset.notificationCard) {
+    selectedCardId = button.dataset.notificationCard;
+    currentView = "cardPurchases";
+    render();
+    return;
+  }
+  if (kind === "installment" && button.dataset.notificationPurchase) {
+    selectedPurchaseId = button.dataset.notificationPurchase;
+    currentView = "installments";
+    render();
+    return;
+  }
+  currentView = button.dataset.notificationView || "notifications";
+  render();
 }
 
 function monthSituationTemplate(dashboard, monthNet) {
@@ -3675,14 +3718,8 @@ function bindAppEvents() {
     render();
   }));
   document.querySelectorAll("[data-notification-id]").forEach(button => button.addEventListener("click", () => {
-    markNotificationRead(button.dataset.notificationId);
-    currentView = button.dataset.notificationView;
-    render();
+    openNotificationTarget(button);
   }));
-  document.querySelector("[data-read-all]")?.addEventListener("click", () => {
-    markAllNotificationsRead();
-    render();
-  });
   document.querySelector("[data-close-receivables]")?.addEventListener("click", () => {
     dashboardDetail = null;
     currentView = receivablesReturnView;
