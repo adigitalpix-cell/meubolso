@@ -1274,7 +1274,7 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
 .history-transaction-main time { color: #64726d; font-size: .64rem; font-weight: 700; }
 .history-transaction-main p { margin-top: 4px; color: #64726d; font-size: .65rem; font-weight: 650; }
 .history-transaction-main small { max-width: 100%; margin-top: 4px; color: #78847f; font-size: .62rem; }
-.history-transaction .transaction-value { min-width: 88px; padding-top: 0; }
+.history-transaction .transaction-value { min-width: 88px; padding-top: 0; display: flex; flex-direction: column; align-items: flex-end; }
 .history-transaction .transaction-value strong { font-size: .86rem; font-weight: 900; white-space: nowrap; }
 .history-income-value { color: #08704c !important; }
 .history-expense-value { color: #c73535 !important; }
@@ -1286,10 +1286,10 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
 .card-history-transaction { border: 1px solid #dfe9e4; background: #fff; }
 .card-history-transaction .transaction-icon { color: #d5ff78; background: linear-gradient(145deg,#0a513b,#052a20); }
 .card-history-name { display: block; margin-bottom: 3px; overflow: hidden; color: #187252; font-size: .52rem; font-weight: 950; letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.transaction-options { position: absolute; z-index: 24; top: 50px; right: 12px; bottom: auto; width: 32px; height: 32px; }
-.transaction-options summary { width: 32px; height: 32px; min-height: 32px; }
-.transaction-options > div { top: 38px; right: 0; bottom: auto; min-width: 145px; }
-.transaction-month-group:last-child .transaction-month-list > .history-transaction:last-child .transaction-options > div { top: auto; bottom: 38px; }
+.transaction-options { position: relative; z-index: 24; top: auto; right: auto; bottom: auto; width: 29px; height: 29px; flex: 0 0 29px; align-self: center; margin-top: 7px; }
+.transaction-options summary { width: 29px; height: 29px; min-height: 29px; }
+.transaction-options > div { top: 34px; right: 0; bottom: auto; min-width: 145px; }
+.transaction-month-group:last-child .transaction-month-list > .history-transaction:last-child .transaction-options > div { top: auto; bottom: 34px; }
 .transaction-history-empty { border: 1px solid #dfe9e4; color: #6c7a74; background: linear-gradient(145deg,#f9fcfa,#f1f6f3); box-shadow: 0 8px 22px rgba(12,53,41,.05); }
 
 @media (max-width: 380px) {
@@ -1303,7 +1303,7 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
   .history-transaction .transaction-value { min-width: 76px; }
   .history-transaction .transaction-value strong { font-size: .75rem; }
   .history-transaction-main h3 { font-size: .82rem; }
-  .transaction-options { top: 46px; right: 10px; bottom: auto; }
+  .transaction-options { top: auto; right: auto; bottom: auto; }
   .transaction-filter-panel { width: min(310px, calc(100vw - 28px)); }
   .transaction-filter-panel section:nth-child(2) > div { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }

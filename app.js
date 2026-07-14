@@ -73,6 +73,7 @@ let transactionFilter = "all";
 let transactionSearch = "";
 let transactionStatusFilter = "all";
 let transactionPeriodFilter = "all";
+let transactionsReturnView = "home";
 let editingTransactionId = null;
 let editingUserId = null;
 let userFormOpen = false;
@@ -1534,6 +1535,7 @@ function navButton(view, icon, label) {
 }
 
 function openTransactionsRoot() {
+  if (currentView !== "transactions") transactionsReturnView = currentView;
   document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
   document.querySelectorAll(".receivable-options[open], .category-options[open], .transaction-advanced-filters[open]").forEach(menu => { menu.open = false; });
   editingTransactionId = null;
@@ -1543,6 +1545,12 @@ function openTransactionsRoot() {
   purchaseFormOpen = false;
   if (!["all", "income", "expense", "card"].includes(transactionFilter)) transactionFilter = "all";
   currentView = "transactions";
+  render();
+}
+
+function closeTransactionsView() {
+  const target = transactionsReturnView && transactionsReturnView !== "transactions" && canAccessView(transactionsReturnView) ? transactionsReturnView : "home";
+  currentView = target;
   render();
 }
 
@@ -2840,7 +2848,10 @@ function statusLabel(item) {
 function transactionsTemplate() {
   const filtered = filteredHistoryTransactions();
   return `
-    <header class="transactions-page-header"><h1>Transações</h1><p>Acompanhe tudo que entra e sai.</p></header>
+    <button class="receivables-back-header" data-close-transactions aria-label="Voltar para a tela anterior">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+      <span><strong>Transações</strong><small>Acompanhe tudo que entra e sai.</small></span>
+    </button>
     <div class="transaction-filters" role="group" aria-label="Filtrar transações">
       ${filterButton("all", "Todas")}${filterButton("income", "Receitas")}${filterButton("expense", "Despesas")}${filterButton("card", "Cartões")}
     </div>
@@ -3029,8 +3040,8 @@ function regularHistoryTransaction(item) {
       <div class="transaction-value">
         <strong class="${item.type === "income" ? "history-income-value" : "history-expense-value"}">${item.type === "income" ? "+" : "-"} ${money(item.amount)}</strong>
         <span class="status ${status.className}">${status.label}</span>
+        ${transactionHistoryActions(item)}
       </div>
-      ${transactionHistoryActions(item)}
     </article>`;
 }
 
@@ -3053,8 +3064,8 @@ function cardHistoryTransaction(item) {
       <div class="transaction-value">
         <strong class="history-expense-value">- ${money(item.amount)}</strong>
         <span class="status ${status.className}">${status.label}</span>
+        ${transactionHistoryActions(item)}
       </div>
-      ${transactionHistoryActions(item)}
     </article>`;
 }
 
@@ -3869,6 +3880,7 @@ function bindAppEvents() {
       openTransactionsRoot();
       return;
     }
+    if (target === "transactions" && currentView !== "transactions") transactionsReturnView = currentView;
     if (target === "users") userListScope = "all";
     if (target === "home" && !isMaster()) {
       try {
@@ -3909,6 +3921,7 @@ function bindAppEvents() {
     currentView = "home";
     render();
   });
+  document.querySelector("[data-close-transactions]")?.addEventListener("click", closeTransactionsView);
   document.querySelectorAll("[data-add], [data-add-type]").forEach(button => button.addEventListener("click", () => {
     if (isMaster()) return showToast("Apenas usuários podem cadastrar movimentações.");
     if (currentView === "card") {
