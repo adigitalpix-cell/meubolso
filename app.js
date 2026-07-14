@@ -2849,7 +2849,6 @@ function transactionsTemplate() {
       <input type="search" data-transaction-search value="${escapeAttribute(transactionSearch)}" placeholder="Buscar transação..." autocomplete="off">
     </label>
     ${transactionAdvancedFiltersTemplate()}
-    ${transactionActiveFilterChips()}
     <div class="transaction-history-list" data-transaction-results>${transactionHistoryRows(filtered)}</div>`;
 }
 
@@ -2857,6 +2856,7 @@ function transactionAdvancedFiltersTemplate() {
   const activeCount = Number(transactionStatusFilter !== "all") + Number(transactionPeriodFilter !== "all");
   return `
     <div class="transaction-filter-toolbar">
+      ${transactionActiveFilterChips()}
       <details class="transaction-advanced-filters">
         <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg><span>Filtros${activeCount ? ` (${activeCount})` : ""}</span></summary>
         <div class="transaction-filter-panel">
