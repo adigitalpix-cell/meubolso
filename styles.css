@@ -831,6 +831,20 @@ button { cursor: pointer; }
 .payables-overdue-section > header i { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 15px; color: #d91628; background: #ffdfe3; }
 .payables-overdue-section > header i svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .payables-overdue-section > .payables-list { padding: 0 4px 4px; }
+.overdue-value-page { padding-bottom: 8px; }
+.overdue-value-hero > i, .overdue-value-hero > b { color: #ff4653; }
+.overdue-value-hero > b svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.overdue-value-groups { display: grid; gap: 15px; }
+.overdue-value-month-section { padding: 0 4px 4px; border: 1px solid #f0d1d4; border-radius: 20px; background: linear-gradient(135deg, #fffafa, #fff4f5); box-shadow: 0 8px 20px rgba(137, 17, 31, .06); }
+.overdue-value-month-section > h3 { margin: 0 -5px 1px; padding: 12px 14px; border-radius: 19px 19px 13px 13px; color: #6f222a; background: linear-gradient(135deg, #fff1f3, #ffe8eb); text-transform: uppercase; }
+.overdue-value-month-section > .payables-list { padding: 4px; }
+.overdue-card-section > h3 { color: #6f222a; text-transform: uppercase; }
+.overdue-card-group { border-color: #efcdd1; background: linear-gradient(135deg, #fff, #fff8f8); }
+.overdue-value-empty-state { min-height: 180px; padding: 28px 18px; display: grid; place-items: center; align-content: center; gap: 8px; border: 1px dashed #e3bfc3; border-radius: 22px; color: #785b5f; background: linear-gradient(135deg, #fffafa, #fff2f4); text-align: center; }
+.overdue-value-empty-state i { width: 49px; height: 49px; display: grid; place-items: center; border-radius: 50%; color: #d61b2d; background: #ffe2e5; }
+.overdue-value-empty-state i svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.overdue-value-empty-state strong { color: #4a252a; font-size: .9rem; }
+.overdue-value-empty-state span { font-size: .72rem; }
 
 @media (max-width: 380px) {
   .payables-page { gap: 12px; }
@@ -850,6 +864,7 @@ button { cursor: pointer; }
   .payables-toggle-card { padding-inline: 8px; }
   .payables-card-summary { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; }
   .payables-card-summary > i { width: 40px; height: 40px; }
+  .overdue-value-month-section > h3 { padding-inline: 12px; font-size: .76rem; }
 }
 
 /* Adicionar transação · refinamento visual MB C2 */

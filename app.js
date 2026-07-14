@@ -92,7 +92,9 @@ let dashboardDetail = null;
 let receivablesReturnView = "home";
 let receivedIncomeReturnView = "home";
 let paidExpenseReturnView = "home";
+let overdueValueReturnView = "home";
 let payablesExpandedCardIds = new Set();
+let overdueExpandedCardIds = new Set();
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
 let activeListType = "categories";
@@ -1933,6 +1935,7 @@ function dashboardDetailTemplate(type) {
   if (type === "received") return receivedIncomeDetailTemplate();
   if (type === "paid") return paidExpenseDetailTemplate();
   if (type === "toPay") return payablesDetailTemplate();
+  if (type === "overdueValue") return overdueValueDetailTemplate();
   const title = ({
     invoice: "Fatura detalhada",
     cards: "Resumo dos cartões",
@@ -2128,6 +2131,103 @@ function payablesCardIcon() {
 
 function payablesAlertIcon() {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 17H3zM12 9v5M12 17h.01"/></svg>`;
+}
+
+function overdueValueDetailTemplate() {
+  const items = overdueValueItems();
+  const regularItems = items.filter(item => item.source !== "card-installment-virtual");
+  const cardGroups = overdueCardGroups(items);
+  const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const monthGroups = overdueMonthGroups(regularItems);
+  const hasItems = regularItems.length || cardGroups.length;
+  return `
+    <section class="dashboard-detail-page payables-page overdue-value-page">
+      <button class="receivables-back-header" data-close-overdue-value aria-label="Voltar para a tela anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Valor em Atraso</strong><small>Acompanhe todas as despesas vencidas.</small></span>
+      </button>
+      <section class="payables-hero overdue-value-hero">
+        <i>${payablesAlertIcon()}</i>
+        <div><span>Pendências em atraso</span><h2>Valor em Atraso</h2><small>Total em atraso</small><strong>${money(total)}</strong></div>
+        <b aria-hidden="true">${payablesAlertIcon()}</b>
+      </section>
+      ${hasItems ? `
+        ${monthGroups.length ? `<div class="overdue-value-groups">${monthGroups.map(overdueMonthGroupTemplate).join("")}</div>` : ""}
+        ${cardGroups.length ? `<section class="payables-card-section overdue-card-section"><h3>${payablesCardIcon()}<span>Parcelas de cartão em atraso</span></h3><div class="payables-card-groups">${cardGroups.map(overdueCardGroupTemplate).join("")}</div></section>` : ""}
+      ` : `<div class="overdue-value-empty-state"><i>${payablesAlertIcon()}</i><strong>Nenhuma despesa em atraso.</strong><span>Suas contas estão em dia.</span></div>`}
+    </section>`;
+}
+
+function overdueValueItems() {
+  const today = dateOffset();
+  return dashboardTransactions()
+    .filter(item => item.type !== "income" && item.status === "pending" && item.dueDate < today)
+    .sort((a, b) => String(b.dueDate || "").localeCompare(String(a.dueDate || "")));
+}
+
+function overdueMonthGroups(items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const key = dueMonthKey(item);
+    groups.set(key, [...(groups.get(key) || []), item]);
+  });
+  return [...groups.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([key, entries]) => ({ key, entries: entries.sort((a, b) => b.dueDate.localeCompare(a.dueDate)) }));
+}
+
+function overdueMonthGroupTemplate(group) {
+  return `
+    <section class="payables-current-section overdue-value-month-section">
+      <h3>${payablesCalendarIcon()}<span>${escapeHtml(payablesMonthLabel(group.key))}</span></h3>
+      <div class="payables-list">${group.entries.map(overdueValueExpenseCard).join("")}</div>
+    </section>`;
+}
+
+function overdueValueExpenseCard(item) {
+  const repeat = item.repeat === "fixed" ? "Mensal" : "Não repete";
+  const days = overdueDays(item);
+  return `
+    <article class="payable-expense-card overdue overdue-value-expense-card">
+      <i class="payable-category-icon">${payableCategoryIconSvg(item.category)}</i>
+      <div class="payable-expense-copy"><h4>${escapeHtml(item.name)}</h4><p>${escapeHtml(item.category || "Outros")} · Vencimento: ${formatDate(item.dueDate, true)}${item.repeat ? ` · ${repeat}` : ""}</p><small>${escapeHtml(item.paymentMethod || item.account || "Conta corrente")}</small><b class="payable-overdue-badge">Atrasado ${days} ${days === 1 ? "dia" : "dias"}</b></div>
+      <div class="payable-expense-value"><strong>- ${money(item.amount)}</strong><span>Atrasado</span></div>
+      <div class="payable-actions">
+        <button type="button" class="payable-pay-button" data-pay-transaction="${escapeAttribute(item.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>
+        <details class="receivable-options payable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button></div></details>
+      </div>
+    </article>`;
+}
+
+function overdueCardGroups(items = overdueValueItems()) {
+  const groups = new Map();
+  items.filter(item => item.source === "card-installment-virtual").forEach(item => {
+    const purchase = userCardPurchases().find(entry => entry.id === item.sourcePurchaseId);
+    const card = userCards().find(entry => entry.id === purchase?.cardId);
+    if (!purchase || !card) return;
+    const group = groups.get(card.id) || { card, items: [], total: 0 };
+    group.items.push({ ...item, purchase });
+    group.total += Number(item.amount || 0);
+    groups.set(card.id, group);
+  });
+  return [...groups.values()]
+    .map(group => ({ ...group, items: group.items.sort((a, b) => b.dueDate.localeCompare(a.dueDate)) }))
+    .sort((a, b) => a.card.name.localeCompare(b.card.name, "pt-BR"));
+}
+
+function overdueCardGroupTemplate(group) {
+  const expanded = overdueExpandedCardIds.has(group.card.id);
+  const count = group.items.length;
+  return `
+    <article class="payables-card-group overdue-card-group ${expanded ? "expanded" : ""}">
+      <div class="payables-card-summary"><i>${payablesCardIcon()}</i><div><h4>${escapeHtml(group.card.name)}</h4><p>${count} ${count === 1 ? "parcela vencida" : "parcelas vencidas"}</p></div><div class="payables-card-total"><small>Total</small><strong>${money(group.total)}</strong></div></div>
+      ${expanded ? `<div class="payables-installment-list">${group.items.map(payablesInstallmentRow).join("")}<div class="payables-installment-total"><b>Total vencido</b><strong>${money(group.total)}</strong></div></div>` : ""}
+      <div class="payables-card-actions">
+        <button type="button" class="payable-pay-button" data-pay-overdue-card="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>
+        <details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>
+        <button type="button" class="payables-toggle-card" data-toggle-overdue-card="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar parcelas" : "Ver parcelas"}</span></button>
+      </div>
+    </article>`;
 }
 
 function receivedIncomeDetailTemplate() {
@@ -3533,6 +3633,7 @@ function bindAppEvents() {
     const detail = button.dataset.dashboardDetail;
     if (detail === "received") receivedIncomeReturnView = currentView;
     if (detail === "paid") paidExpenseReturnView = currentView;
+    if (detail === "overdueValue") overdueValueReturnView = currentView;
     if (detail === "toReceive" && !isMaster()) {
       receivablesReturnView = currentView;
       try {
@@ -3597,6 +3698,11 @@ function bindAppEvents() {
     currentView = paidExpenseReturnView;
     render();
   });
+  document.querySelector("[data-close-overdue-value]")?.addEventListener("click", () => {
+    dashboardDetail = null;
+    currentView = overdueValueReturnView;
+    render();
+  });
   document.querySelector("[data-close-payables]")?.addEventListener("click", () => {
     dashboardDetail = null;
     currentView = "home";
@@ -3609,6 +3715,13 @@ function bindAppEvents() {
     render();
   }));
   document.querySelectorAll("[data-pay-payables-card]").forEach(button => button.addEventListener("click", () => payPayablesCardGroup(button.dataset.payPayablesCard)));
+  document.querySelectorAll("[data-toggle-overdue-card]").forEach(button => button.addEventListener("click", () => {
+    const cardId = button.dataset.toggleOverdueCard;
+    if (overdueExpandedCardIds.has(cardId)) overdueExpandedCardIds.delete(cardId);
+    else overdueExpandedCardIds.add(cardId);
+    render();
+  }));
+  document.querySelectorAll("[data-pay-overdue-card]").forEach(button => button.addEventListener("click", () => payOverdueCardGroup(button.dataset.payOverdueCard)));
   const receivableMenus = [...document.querySelectorAll(".receivable-options")];
   receivableMenus.forEach(menu => {
     menu.addEventListener("toggle", () => {
@@ -5130,6 +5243,56 @@ async function payPayablesCardGroup(cardId) {
   }
   logActivity(`Pagou parcelas do cartão ${group.card.name}. Valor: ${money(group.total)}. Método: ${method}.`);
   showToast("Parcelas pagas com sucesso.");
+  render();
+}
+
+async function payOverdueCardGroup(cardId) {
+  if (isMaster()) return;
+  const group = overdueCardGroups().find(entry => entry.card.id === cardId);
+  if (!group?.items.length || group.total <= 0) return showToast("Não há parcelas vencidas para este cartão.");
+  const method = await requestPaymentMethod({
+    type: "expense",
+    name: `Parcelas vencidas do cartão ${group.card.name}`,
+    amount: group.total,
+    dueDate: group.items[0].dueDate
+  });
+  if (!method) return;
+  const purchaseIds = [...new Set(group.items.map(item => item.purchase.id))];
+  const purchases = purchaseIds.map(id => userCardPurchases().find(item => item.id === id)).filter(Boolean);
+  const snapshots = new Map(purchases.map(purchase => [purchase.id, {
+    paidInstallments: [...(purchase.paidInstallments || [])],
+    installmentPayments: JSON.parse(JSON.stringify(purchase.installmentPayments || {}))
+  }]));
+  const paidAt = nowParts();
+  group.items.forEach(item => {
+    const purchase = purchases.find(entry => entry.id === item.purchase.id);
+    if (!purchase) return;
+    purchase.paidInstallments ||= [];
+    purchase.installmentPayments ||= {};
+    if (!purchase.paidInstallments.includes(item.sourceInstallment)) purchase.paidInstallments.push(item.sourceInstallment);
+    purchase.installmentPayments[item.sourceInstallment] = {
+      paidDate: paidAt.date,
+      paidTime: paidAt.time,
+      paymentMethod: method,
+      account: group.card.name
+    };
+  });
+  purchases.forEach(syncPaidInstallmentTransactions);
+  try {
+    await Promise.all(purchases.map(savePurchaseToSupabase));
+    const paidTransactions = (db.transactions[session] || []).filter(item => purchaseIds.includes(item.sourcePurchaseId));
+    await Promise.all(paidTransactions.map(item => saveTransactionToSupabase(item)));
+    await refreshUserFinancialData();
+  } catch (error) {
+    purchases.forEach(purchase => {
+      const snapshot = snapshots.get(purchase.id);
+      purchase.paidInstallments = snapshot.paidInstallments;
+      purchase.installmentPayments = snapshot.installmentPayments;
+    });
+    return showToast("Não foi possível salvar no Supabase.");
+  }
+  logActivity(`Pagou parcelas vencidas do cartão ${group.card.name}. Valor: ${money(group.total)}. Método: ${method}.`);
+  showToast("Parcelas vencidas pagas com sucesso.");
   render();
 }
 
