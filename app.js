@@ -71,6 +71,8 @@ let currentView = "home";
 let authView = "login";
 let transactionFilter = "all";
 let transactionSearch = "";
+let transactionStatusFilter = "all";
+let transactionPeriodFilter = "all";
 let editingTransactionId = null;
 let editingUserId = null;
 let userFormOpen = false;
@@ -1528,7 +1530,20 @@ function shellTemplate() {
 }
 
 function navButton(view, icon, label) {
-  return `<button class="nav-button ${currentView === view ? "active" : ""}" data-view="${view}"><b aria-hidden="true">${icon}</b><span>${label}</span></button>`;
+  return `<button class="nav-button ${currentView === view ? "active" : ""}" data-view="${view}" data-nav-view="${view}"><b aria-hidden="true">${icon}</b><span>${label}</span></button>`;
+}
+
+function openTransactionsRoot() {
+  document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
+  document.querySelectorAll(".receivable-options[open], .category-options[open], .transaction-advanced-filters[open]").forEach(menu => { menu.open = false; });
+  editingTransactionId = null;
+  editingPurchaseId = null;
+  selectedPurchaseId = null;
+  dashboardDetail = null;
+  purchaseFormOpen = false;
+  if (!["all", "income", "expense", "card"].includes(transactionFilter)) transactionFilter = "all";
+  currentView = "transactions";
+  render();
 }
 
 function viewTemplate() {
@@ -2833,12 +2848,38 @@ function transactionsTemplate() {
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>
       <input type="search" data-transaction-search value="${escapeAttribute(transactionSearch)}" placeholder="Buscar transação..." autocomplete="off">
     </label>
+    ${transactionAdvancedFiltersTemplate()}
+    ${transactionActiveFilterChips()}
     <div class="transaction-history-list" data-transaction-results>${transactionHistoryRows(filtered)}</div>`;
+}
+
+function transactionAdvancedFiltersTemplate() {
+  const activeCount = Number(transactionStatusFilter !== "all") + Number(transactionPeriodFilter !== "all");
+  return `
+    <div class="transaction-filter-toolbar">
+      <details class="transaction-advanced-filters">
+        <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg><span>Filtros${activeCount ? ` (${activeCount})` : ""}</span></summary>
+        <div class="transaction-filter-panel">
+          <section><strong>Status</strong><div>${[["all", "Ambos"], ["paid", "Pago"], ["unpaid", "Não pago"]].map(([value, label]) => `<button type="button" class="${transactionStatusFilter === value ? "active" : ""}" data-transaction-status-option="${value}">${label}</button>`).join("")}</div></section>
+          <section><strong>Período</strong><div>${[["all", "Todos"], ["today", "Hoje"], ["week", "Semana"], ["month", "Mês"]].map(([value, label]) => `<button type="button" class="${transactionPeriodFilter === value ? "active" : ""}" data-transaction-period-option="${value}">${label}</button>`).join("")}</div></section>
+          <footer><button type="button" data-clear-transaction-filters>Limpar filtros</button><button type="button" class="apply" data-apply-transaction-filters>Aplicar filtros</button></footer>
+        </div>
+      </details>
+    </div>`;
+}
+
+function transactionActiveFilterChips() {
+  const chips = [];
+  const statusLabels = { paid: "Pago", unpaid: "Não pago" };
+  const periodLabels = { today: "Hoje", week: "Esta semana", month: "Este mês" };
+  if (statusLabels[transactionStatusFilter]) chips.push(`<button type="button" data-remove-transaction-filter="status">${statusLabels[transactionStatusFilter]} <span>×</span></button>`);
+  if (periodLabels[transactionPeriodFilter]) chips.push(`<button type="button" data-remove-transaction-filter="period">${periodLabels[transactionPeriodFilter]} <span>×</span></button>`);
+  return chips.length ? `<div class="transaction-filter-chips" aria-label="Filtros ativos">${chips.join("")}</div>` : "";
 }
 
 function filteredHistoryTransactions() {
   const search = normalizeTransactionSearch(transactionSearch);
-  return dashboardTransactions()
+  return transactionHistoryItems()
     .filter(item => {
       const cardItem = isCardHistoryItem(item);
       if (transactionFilter === "card") return cardItem;
@@ -2846,6 +2887,8 @@ function filteredHistoryTransactions() {
       if (transactionFilter === "expense") return !cardItem && item.type === "expense";
       return true;
     })
+    .filter(item => transactionStatusFilter === "all" || (transactionStatusFilter === "paid" ? isPaidStatus(item) : !isPaidStatus(item)))
+    .filter(item => transactionMatchesPeriod(item, transactionPeriodFilter))
     .filter(item => {
       if (!search) return true;
       const searchable = [
@@ -2873,6 +2916,25 @@ function filteredHistoryTransactions() {
       return searchable.includes(search);
     })
     .sort(compareTransactionsNewestFirst);
+}
+
+function transactionMatchesPeriod(item, period) {
+  if (period === "all") return true;
+  const movementDate = transactionSortValue(item).trim().split(" ")[0] || item.dueDate || "";
+  if (!movementDate) return false;
+  const today = dateOffset();
+  if (period === "today") return movementDate === today;
+  if (period === "month") return movementDate.slice(0, 7) === today.slice(0, 7);
+  if (period === "week") {
+    const todayDate = new Date(`${today}T12:00:00`);
+    const movement = new Date(`${movementDate}T12:00:00`);
+    const weekStart = new Date(todayDate);
+    weekStart.setDate(todayDate.getDate() - (todayDate.getDay() + 6) % 7);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    return movement >= weekStart && movement <= weekEnd;
+  }
+  return true;
 }
 
 function transactionHistoryItems() {
@@ -2910,7 +2972,7 @@ function transactionHistoryItems() {
 
 function transactionHistoryRows(items) {
   if (!items.length) {
-    const filtered = transactionFilter !== "all" || transactionSearch.trim();
+    const filtered = transactionFilter !== "all" || transactionStatusFilter !== "all" || transactionPeriodFilter !== "all" || transactionSearch.trim();
     return `<div class="empty transaction-history-empty">${filtered ? "Nenhuma transação encontrada para este filtro." : "Nenhuma transação encontrada."}</div>`;
   }
   return groupHistoryTransactions(items).map(group => `
@@ -3803,6 +3865,10 @@ function bindAppEvents() {
   document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", async () => {
     const target = button.dataset.view;
     if (!canAccessView(target)) return showToast("Você não tem permissão para acessar esta área.");
+    if (button.dataset.navView === "transactions") {
+      openTransactionsRoot();
+      return;
+    }
     if (target === "users") userListScope = "all";
     if (target === "home" && !isMaster()) {
       try {
@@ -3861,6 +3927,36 @@ function bindAppEvents() {
     transactionFilter = button.dataset.filter;
     render();
   }));
+  document.querySelectorAll("[data-transaction-status-option]").forEach(button => button.addEventListener("click", () => {
+    document.querySelectorAll("[data-transaction-status-option]").forEach(option => option.classList.remove("active"));
+    button.classList.add("active");
+  }));
+  document.querySelectorAll("[data-transaction-period-option]").forEach(button => button.addEventListener("click", () => {
+    document.querySelectorAll("[data-transaction-period-option]").forEach(option => option.classList.remove("active"));
+    button.classList.add("active");
+  }));
+  document.querySelector("[data-apply-transaction-filters]")?.addEventListener("click", () => {
+    transactionStatusFilter = document.querySelector("[data-transaction-status-option].active")?.dataset.transactionStatusOption || "all";
+    transactionPeriodFilter = document.querySelector("[data-transaction-period-option].active")?.dataset.transactionPeriodOption || "all";
+    render();
+  });
+  document.querySelector("[data-clear-transaction-filters]")?.addEventListener("click", () => {
+    transactionStatusFilter = "all";
+    transactionPeriodFilter = "all";
+    render();
+  });
+  document.querySelectorAll("[data-remove-transaction-filter]").forEach(button => button.addEventListener("click", () => {
+    if (button.dataset.removeTransactionFilter === "status") transactionStatusFilter = "all";
+    if (button.dataset.removeTransactionFilter === "period") transactionPeriodFilter = "all";
+    render();
+  }));
+  if (!bindAppEvents.transactionFilterOutsideBound) {
+    document.addEventListener("click", event => {
+      if (event.target.closest(".transaction-advanced-filters")) return;
+      document.querySelectorAll(".transaction-advanced-filters[open]").forEach(panel => { panel.open = false; });
+    });
+    bindAppEvents.transactionFilterOutsideBound = true;
+  }
   document.querySelectorAll("[data-financial-composition]").forEach(button => button.addEventListener("click", () => {
     profileDashboardDetailType = button.dataset.financialComposition;
     currentView = "profileDashboardDetail";
@@ -4102,6 +4198,10 @@ function logout() {
   clearSession();
   currentView = "home";
   authView = "login";
+  transactionFilter = "all";
+  transactionSearch = "";
+  transactionStatusFilter = "all";
+  transactionPeriodFilter = "all";
   render();
   showToast("Operação realizada com sucesso.");
 }
