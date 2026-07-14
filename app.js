@@ -1672,6 +1672,7 @@ function notificationCenterSources() {
         amount: Number(item.amount || 0),
         kind: "installment",
         purchaseId: item.sourcePurchaseId,
+        installmentKey: item.sourceInstallment,
         priority: todayDue ? 40 : 20
       };
     });
@@ -1765,31 +1766,25 @@ function notificationsTemplate() {
 
 function notificationCenterRow(item) {
   return `
-    <button class="notification-center-item" data-notification-id="${escapeAttribute(item.id)}" data-notification-kind="${escapeAttribute(item.kind || "")}" data-notification-record="${escapeAttribute(item.recordId || "")}" data-notification-card="${escapeAttribute(item.cardId || "")}" data-notification-purchase="${escapeAttribute(item.purchaseId || "")}" data-notification-view="${escapeAttribute(item.view || "")}">
+    <button class="notification-center-item" data-notification-id="${escapeAttribute(item.id)}" data-notification-kind="${escapeAttribute(item.kind || "")}" data-notification-record="${escapeAttribute(item.recordId || "")}" data-notification-card="${escapeAttribute(item.cardId || "")}" data-notification-purchase="${escapeAttribute(item.purchaseId || "")}" data-notification-installment="${escapeAttribute(item.installmentKey || "")}" data-notification-view="${escapeAttribute(item.view || "")}">
       <span class="notification-copy"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><small><svg viewBox="0 0 18 18" aria-hidden="true"><rect x="3" y="4.5" width="12" height="10" rx="1.8"/><path d="M6 2.8v3M12 2.8v3M3 7.5h12"/></svg>${formatDate(item.date, true)} — ${escapeHtml(item.time)}</small></span>
       ${Number.isFinite(item.amount) ? `<b>${money(item.amount)}</b>` : ""}
       <i aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m7 4 6 6-6 6"/></svg></i>
     </button>`;
 }
 
-function openNotificationTarget(button) {
+async function openNotificationTarget(button) {
   const kind = button.dataset.notificationKind;
   if (kind === "movement" && button.dataset.notificationRecord) {
-    currentView = "transactions";
-    render();
-    editTransaction(button.dataset.notificationRecord);
+    await markTransactionPaid(button.dataset.notificationRecord);
     return;
   }
   if (kind === "invoice" && button.dataset.notificationCard) {
-    selectedCardId = button.dataset.notificationCard;
-    currentView = "cardPurchases";
-    render();
+    await payCardInvoice(button.dataset.notificationCard, { fromNotification: true });
     return;
   }
-  if (kind === "installment" && button.dataset.notificationPurchase) {
-    selectedPurchaseId = button.dataset.notificationPurchase;
-    currentView = "installments";
-    render();
+  if (kind === "installment" && button.dataset.notificationPurchase && button.dataset.notificationInstallment) {
+    await payCardInstallment(button.dataset.notificationPurchase, button.dataset.notificationInstallment, { fromNotification: true });
     return;
   }
   currentView = button.dataset.notificationView || "notifications";
@@ -4490,14 +4485,14 @@ async function deleteCategory(categoryId) {
   render();
 }
 
-function requestPaymentMethod(item) {
+function requestPaymentMethod(item, labels = {}) {
   const dialog = document.querySelector("#payment-method-dialog");
   const form = document.querySelector("#payment-method-form");
   const isIncome = item.type === "income";
   form.reset();
-  document.querySelector("#payment-method-eyebrow").textContent = isIncome ? "Confirmar recebimento" : "Confirmar pagamento";
-  document.querySelector("#payment-method-title").textContent = isIncome ? "Marcar como recebido" : "Marcar como pago";
-  document.querySelector("#payment-method-legend").textContent = isIncome ? "Método de recebimento" : "Método de pagamento";
+  document.querySelector("#payment-method-eyebrow").textContent = labels.eyebrow || (isIncome ? "Confirmar recebimento" : "Confirmar pagamento");
+  document.querySelector("#payment-method-title").textContent = labels.title || (isIncome ? "Marcar como recebido" : "Marcar como pago");
+  document.querySelector("#payment-method-legend").textContent = labels.legend || (isIncome ? "Método de recebimento" : "Método de pagamento");
   document.querySelector("#payment-method-summary").innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${money(item.amount)} · Vencimento: ${formatDate(item.dueDate, true)}</span>`;
   return new Promise(resolve => {
     let settled = false;
@@ -5199,8 +5194,9 @@ async function deletePurchaseCascade(purchaseId) {
   await deleteRowById("compras_cartao", purchaseId);
 }
 
-async function payCardInstallment(purchaseId, installmentKey = null) {
-  if (isMaster() || !await confirmAction()) return;
+async function payCardInstallment(purchaseId, installmentKey = null, options = {}) {
+  if (isMaster()) return;
+  if (!options.fromNotification && !await confirmAction()) return;
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
   if (!purchase) return showToast("Não foi possível concluir a operação.");
   const info = installmentInfo(purchase);
@@ -5208,14 +5204,29 @@ async function payCardInstallment(purchaseId, installmentKey = null) {
   const key = installmentKey || pending?.key || info.key;
   if (!installmentKey && !pending) return showToast("Não foi possível concluir a operação.");
   if ((purchase.paidInstallments || []).includes(key)) return showToast("Não foi possível concluir a operação.");
+  const card = userCards().find(item => item.id === purchase.cardId);
+  const installmentNumber = Number(String(key).split("-").pop()) || 1;
+  let paymentMethod = "Cartão";
+  if (options.fromNotification) {
+    paymentMethod = await requestPaymentMethod({
+      type: "expense",
+      name: `${card?.name || "Cartão"} · ${purchase.name} · Parcela ${installmentNumber}/${purchase.installments}`,
+      amount: Number(purchase.amount || 0) / Number(purchase.installments || 1),
+      dueDate: installmentDueDate(purchase, installmentNumber)
+    }, {
+      eyebrow: "Confirmar pagamento da parcela",
+      title: "Marcar parcela como paga"
+    });
+    if (!paymentMethod) return;
+  }
   purchase.paidInstallments ||= [];
   purchase.installmentPayments ||= {};
   const paidAt = nowParts();
   purchase.installmentPayments[key] = {
     paidDate: paidAt.date,
     paidTime: paidAt.time,
-    paymentMethod: "Cartão",
-    account: userCards().find(card => card.id === purchase.cardId)?.name || "Cartão"
+    paymentMethod,
+    account: card?.name || "Cartão"
   };
   purchase.paidInstallments.push(key);
   db.transactions[session] ||= [];
@@ -5333,21 +5344,36 @@ async function payOverdueCardGroup(cardId) {
   render();
 }
 
-async function payCardInvoice(cardId) {
+async function payCardInvoice(cardId, options = {}) {
   if (isMaster()) return;
   const pending = userCardPurchases().filter(purchase => purchase.cardId === cardId).map(purchase => ({ purchase, info: installmentInfo(purchase) })).filter(item => item.info.active && !item.info.paid);
   const total = pending.reduce((sum, item) => sum + item.info.value, 0);
   if (!pending.length || total <= 0) return showToast("Não há fatura pendente para este cartão.");
-  if (!await confirmInvoicePayment(total)) return;
+  const card = userCards().find(item => item.id === cardId);
+  let paymentMethod = "Cartão";
+  if (options.fromNotification) {
+    const now = new Date(`${dateOffset()}T12:00:00`);
+    const dueDate = localDateKey(new Date(now.getFullYear(), now.getMonth(), Math.min(Number(card?.dueDay || 1), daysInMonth(now.getFullYear(), now.getMonth())), 12));
+    paymentMethod = await requestPaymentMethod({
+      type: "expense",
+      name: `Fatura do cartão ${card?.name || "Cartão"}`,
+      amount: total,
+      dueDate
+    }, {
+      eyebrow: "Confirmar pagamento",
+      title: "Confirmar pagamento da fatura"
+    });
+    if (!paymentMethod) return;
+  } else if (!await confirmInvoicePayment(total)) return;
   const paidAt = nowParts();
-  const account = userCards().find(card => card.id === cardId)?.name || "Cartão";
+  const account = card?.name || "Cartão";
   pending.forEach(({ purchase, info }) => {
     purchase.paidInstallments ||= [];
     purchase.installmentPayments ||= {};
     purchase.installmentPayments[info.key] = {
       paidDate: paidAt.date,
       paidTime: paidAt.time,
-      paymentMethod: "Cartão",
+      paymentMethod,
       account
     };
     if (!purchase.paidInstallments.includes(info.key)) purchase.paidInstallments.push(info.key);
