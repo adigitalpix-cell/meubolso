@@ -100,6 +100,7 @@ let paidExpenseReturnView = "home";
 let overdueValueReturnView = "home";
 let payablesExpandedCardIds = new Set();
 let overdueExpandedCardIds = new Set();
+let expandedRegisteredCardId = null;
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
 let activeListType = "categories";
@@ -3327,7 +3328,9 @@ function purchaseFormTemplate(cards) {
 
 function cardRow(card) {
   const invoice = currentInvoice(card.id);
-  const pendingPurchases = userCardPurchases().filter(purchase => purchase.cardId === card.id && purchaseHasOpenInstallment(purchase)).length;
+  const invoiceItems = currentCardInvoiceItems(card.id);
+  const pendingPurchases = invoiceItems.length;
+  const expanded = expandedRegisteredCardId === card.id;
   const dueDate = cardInvoiceDueDate(card);
   const dueDifference = Math.round((new Date(`${dueDate}T12:00:00`) - new Date(`${dateOffset()}T12:00:00`)) / 86400000);
   const overdueDays = invoice > 0 ? Math.max(-dueDifference, 0) : 0;
@@ -3341,19 +3344,38 @@ function cardRow(card) {
       : dueDifference === 0
         ? "Vence hoje"
         : `Vence em ${dueDifference} dia${dueDifference === 1 ? "" : "s"}`;
+  const optionsMenu = `<details class="receivable-options card-options"><summary aria-label="Mais opções de ${escapeAttribute(card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(card.id)}">Excluir</button></div></details>`;
+  const toggleButton = `<button type="button" class="registered-card-toggle" data-toggle-registered-card="${escapeAttribute(card.id)}" aria-expanded="${expanded}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar compras" : "Ver compras"}</span></button>`;
   return `
-    <article class="registered-card ${accent} ${overdue ? "overdue" : ""}">
-      <div class="registered-card-main">
-        <header><i class="card-brand-accent ${accent}" aria-hidden="true"></i><div><h3>${escapeHtml(card.name)}</h3><span>Fechamento: Dia ${card.closingDay} <b>•</b> Vencimento: Dia ${card.dueDay}</span></div></header>
-        <div class="registered-card-invoice"><span>${overdue ? "Fatura em atraso" : "Fatura atual"}</span><strong>${money(invoice)}</strong><small>${invoiceStatus}</small></div>
+    <article class="registered-card ${accent} ${overdue ? "overdue" : ""} ${expanded ? "expanded" : ""}">
+      <div class="registered-card-summary">
+        <i class="card-brand-accent ${accent}" aria-hidden="true"></i>
+        <div class="registered-card-copy"><h3>${escapeHtml(card.name)}</h3><p>${pendingLabel}</p></div>
+        <div class="registered-card-total"><small>Total</small><strong>${money(invoice)}</strong>${invoice > 0 ? `<span>${invoiceStatus}</span>` : ""}</div>
       </div>
-      <p class="registered-card-pending"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 4h2l1.4 8h8.2l1.6-5.5H5.1M7 16h.1M14 16h.1"/></svg><span>${pendingLabel}</span></p>
+      ${expanded ? `<div class="registered-card-purchases">${invoiceItems.length ? invoiceItems.map(cardInvoicePurchaseRow).join("") : `<p class="registered-card-empty">Nenhuma compra na fatura atual.</p>`}${invoiceItems.length ? `<div class="registered-card-purchases-total"><b>Total do cartão</b><strong>${money(invoice)}</strong></div>` : ""}</div>` : ""}
       <div class="registered-card-actions">
-        <button type="button" data-open-card-purchases="${escapeAttribute(card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7V5.5a5 5 0 0 1 10 0V7M3 7h14l-1 10H4L3 7Z"/></svg><span>Ver Compras</span></button>
-        ${invoice > 0 ? `<button type="button" class="pay-invoice" data-pay-invoice="${escapeAttribute(card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2"/><path d="M2.5 8h15M6 12h3"/></svg><span>Pagar Fatura</span></button>` : ""}
-        <details class="receivable-options card-options"><summary aria-label="Mais opções de ${escapeAttribute(card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(card.id)}">Excluir</button></div></details>
+        ${invoice > 0 ? `<button type="button" class="pay-invoice" data-pay-invoice="${escapeAttribute(card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>${optionsMenu}${toggleButton}` : `${toggleButton}${optionsMenu}`}
       </div>
     </article>`;
+}
+
+function currentCardInvoiceItems(cardId) {
+  return userCardPurchases()
+    .filter(purchase => purchase.cardId === cardId)
+    .map(purchase => ({ purchase, info: installmentInfo(purchase) }))
+    .filter(item => item.info.active && !item.info.paid)
+    .sort((a, b) => installmentDueDate(a.purchase, a.info.current).localeCompare(installmentDueDate(b.purchase, b.info.current)));
+}
+
+function cardInvoicePurchaseRow({ purchase, info }) {
+  const dueDate = installmentDueDate(purchase, info.current);
+  return `
+    <div class="registered-card-purchase-row">
+      <i>${payableCategoryIconSvg(purchase.category)}</i>
+      <div><strong>${escapeHtml(purchase.name)}</strong><span>Parcela ${info.current}/${info.total} · Venc. ${formatDate(dueDate, true)}</span></div>
+      <b>${money(info.value)}</b>
+    </div>`;
 }
 
 function cardInvoiceDueDate(card) {
@@ -4177,6 +4199,11 @@ function bindAppEvents() {
   const installmentDateDialog = document.querySelector("#installment-date-dialog");
   if (installmentDateDialog) installmentDateDialog.oncancel = () => { editingInstallmentDate = null; };
   document.querySelectorAll("[data-pay-invoice]").forEach(button => button.addEventListener("click", event => payCardInvoice(event.currentTarget.dataset.payInvoice)));
+  document.querySelectorAll("[data-toggle-registered-card]").forEach(button => button.addEventListener("click", () => {
+    const cardId = button.dataset.toggleRegisteredCard;
+    expandedRegisteredCardId = expandedRegisteredCardId === cardId ? null : cardId;
+    render();
+  }));
   document.querySelectorAll("[data-open-card-purchases]").forEach(button => button.addEventListener("click", () => {
     selectedCardId = button.dataset.openCardPurchases;
     currentView = "cardPurchases";

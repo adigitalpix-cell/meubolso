@@ -1409,43 +1409,48 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
 .cards-section-heading { margin-top: 1px; }
 .cards-section-heading h2 { font-size: .86rem; letter-spacing: -.015em; }
 .cards-section-heading span { min-width: 27px; color: #0c5c43; background: #e4f2eb; font-size: .68rem; font-weight: 950; }
-.registered-card-list { gap: 11px; }
-.registered-card { padding: 12px; border-radius: 19px; background: #fff; box-shadow: 0 8px 22px rgba(8,54,40,.075); }
-.registered-card::before { top: 0; bottom: 0; width: 4px; border-radius: 19px 0 0 19px; opacity: 1; }
+.registered-card-list { gap: 9px; }
+.registered-card { padding: 10px; border-radius: 16px; background: #fff; box-shadow: 0 6px 17px rgba(8,54,40,.07); }
+.registered-card::before { top: 0; bottom: 0; width: 3px; border-radius: 16px 0 0 16px; opacity: 1; }
 .registered-card.nubank::before { background: #7a27bd; }
 .registered-card.inter::before { background: #ef7218; }
 .registered-card.itau::before { background: #184fa8; }
 .registered-card.mercado-pago::before { background: #2398d0; }
 .registered-card.caixa::before { background: #1476c6; }
-.registered-card-main { display: grid; grid-template-columns: minmax(0,1fr) 112px; align-items: stretch; gap: 9px; }
-.registered-card > .registered-card-main > header { min-width: 0; display: grid; grid-template-columns: 46px minmax(0,1fr); align-items: center; gap: 10px; }
-.card-brand-accent { width: 46px; height: 46px; }
-.registered-card > .registered-card-main > header h3 { margin: 0 0 5px; overflow: hidden; color: #102d25; font-size: 1rem; font-weight: 950; letter-spacing: -.03em; text-overflow: ellipsis; white-space: nowrap; }
-.registered-card > .registered-card-main > header span { color: #626f6a; font-size: .59rem; font-weight: 720; line-height: 1.35; }
-.registered-card > .registered-card-main > header span b { margin: 0 3px; color: #27a171; font-size: .7rem; }
-.registered-card-invoice { min-height: 70px; padding: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-color: #dfece4; border-radius: 13px; text-align: center; background: linear-gradient(135deg,#f2faf5,#eaf5ee); }
-.registered-card-invoice span { margin: 0; color: #187052; font-size: .54rem; }
-.registered-card-invoice strong { color: #0c6549; font-size: 1rem; }
-.registered-card-invoice small { color: #218054; font-size: .58rem; font-weight: 850; }
-.registered-card-pending { width: calc(100% - 121px); margin: 8px 0 0; padding: 6px 9px; display: flex; align-items: center; gap: 6px; color: #17654a; background: linear-gradient(90deg,#eef8f2,#f6faf8); font-size: .61rem; }
-.registered-card-pending svg { width: 15px; height: 15px; flex: 0 0 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.registered-card.nubank .registered-card-pending { color: #6821a8; background: linear-gradient(90deg,#f5edfb,#fbf8fd); }
-.registered-card.inter .registered-card-pending { color: #be5512; background: linear-gradient(90deg,#fff1e8,#fff9f5); }
-.registered-card.caixa .registered-card-pending,
-.registered-card.itau .registered-card-pending,
-.registered-card.mercado-pago .registered-card-pending { color: #126eb1; background: linear-gradient(90deg,#edf6fc,#f8fbfe); }
-.registered-card.overdue .registered-card-invoice { border-color: #f1c9cc; background: linear-gradient(135deg,#fff3f3,#ffe9ea); }
-.registered-card.overdue .registered-card-invoice span,
-.registered-card.overdue .registered-card-invoice strong,
-.registered-card.overdue .registered-card-invoice small { color: #b92631; }
-.registered-card-actions { margin-top: 9px; gap: 7px; }
-.registered-card-actions > button { min-width: 0; height: 34px; min-height: 34px; flex: 1 1 0; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #d8e5df; color: #176248; background: linear-gradient(135deg,#fbfdfc,#f2f7f4); box-shadow: none; font-size: .61rem; }
+.registered-card-summary { min-width: 0; display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 9px; }
+.registered-card-summary .card-brand-accent { width: 38px; height: 38px; border-radius: 11px; }
+.registered-card-summary .card-brand-accent::after { width: 17px; height: 11px; }
+.registered-card-copy { min-width: 0; }
+.registered-card-copy h3 { margin: 0 0 3px; overflow: hidden; color: #102d25; font-size: .82rem; font-weight: 950; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.registered-card-copy p { margin: 0; overflow: hidden; color: #708079; font-size: .56rem; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; }
+.registered-card-total { min-width: 77px; display: grid; justify-items: end; gap: 1px; text-align: right; }
+.registered-card-total small { color: #718079; font-size: .49rem; font-weight: 750; }
+.registered-card-total strong { color: #0b6a4b; font-size: .81rem; font-weight: 950; white-space: nowrap; }
+.registered-card-total span { max-width: 92px; overflow: hidden; color: #368066; font-size: .47rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.registered-card.overdue .registered-card-total strong,
+.registered-card.overdue .registered-card-total span { color: #c42b35; }
+.registered-card-purchases { margin-top: 9px; padding: 2px 9px; border: 1px solid #e4ece8; border-radius: 12px; background: #fbfdfc; }
+.registered-card-purchase-row { min-width: 0; min-height: 44px; display: grid; grid-template-columns: 26px minmax(0,1fr) auto; align-items: center; gap: 8px; }
+.registered-card-purchase-row + .registered-card-purchase-row { border-top: 1px solid #e8eeeb; }
+.registered-card-purchase-row > i { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: #0d7653; background: #e8f5ee; }
+.registered-card-purchase-row > i svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.registered-card-purchase-row > div { min-width: 0; }
+.registered-card-purchase-row > div strong { display: block; overflow: hidden; color: #173b30; font-size: .62rem; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.registered-card-purchase-row > div span { display: block; margin-top: 2px; overflow: hidden; color: #78857f; font-size: .49rem; text-overflow: ellipsis; white-space: nowrap; }
+.registered-card-purchase-row > b { color: #0e6a4c; font-size: .61rem; font-weight: 950; white-space: nowrap; }
+.registered-card-purchases-total { min-height: 33px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #dfe8e3; color: #173c31; font-size: .58rem; }
+.registered-card-purchases-total strong { color: #0b6a4b; font-size: .68rem; }
+.registered-card-empty { margin: 0; padding: 12px 4px; color: #75837d; font-size: .57rem; font-weight: 750; text-align: center; }
+.registered-card-actions { margin-top: 8px; justify-content: flex-start; gap: 6px; }
+.registered-card-actions > button { min-width: 0; width: auto; height: 31px; min-height: 31px; flex: 0 0 auto; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #d8e5df; border-radius: 9px; color: #176248; background: linear-gradient(135deg,#fbfdfc,#f2f7f4); box-shadow: none; font-size: .56rem; font-weight: 900; white-space: nowrap; }
 .registered-card-actions > button svg { width: 15px; height: 15px; flex: 0 0 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.registered-card-actions > button.pay-invoice { border-color: #0a5940; color: #fff; background: linear-gradient(135deg,#0c694a,#043a2c); box-shadow: 0 5px 12px rgba(9,77,54,.16); }
-.registered-card-actions .card-options { width: 34px; height: 34px; flex-basis: 34px; }
-.registered-card-actions .card-options > summary { width: 34px; height: 34px; min-height: 34px; }
-.registered-card-actions .card-options > div { top: 39px; }
-.registered-card-list > .registered-card:last-child .card-options > div { bottom: 39px; }
+.registered-card-actions > button.pay-invoice { border-color: #b9e0cf; color: #0a6a49; background: linear-gradient(135deg,#e9f8f0,#dff2e8); box-shadow: none; }
+.registered-card-actions > button.registered-card-toggle { min-width: 91px; margin-left: auto; }
+.registered-card.expanded .registered-card-toggle svg { transform: rotate(180deg); }
+.registered-card-actions .card-options { width: 31px; height: 31px; flex-basis: 31px; }
+.registered-card-actions .card-options > summary { width: 31px; height: 31px; min-height: 31px; border-radius: 9px; }
+.registered-card-actions .card-options > div { top: 36px; }
+.registered-card-list > .registered-card:last-child .card-options > div { bottom: 36px; }
 
 @media (max-width: 380px) {
   .cards-overview-card { padding: 15px; }
@@ -1456,12 +1461,15 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
   .cards-overview-total strong { font-size: 1.55rem; }
   .cards-overview-grid > div { padding-inline: 7px; }
   .cards-overview-grid b { font-size: .66rem; }
-  .registered-card-main { grid-template-columns: minmax(0,1fr) 102px; gap: 7px; }
-  .registered-card > .registered-card-main > header { grid-template-columns: 40px minmax(0,1fr); gap: 8px; }
-  .card-brand-accent { width: 40px; height: 40px; }
-  .registered-card > .registered-card-main > header h3 { font-size: .88rem; }
-  .registered-card > .registered-card-main > header span { font-size: .53rem; }
-  .registered-card-pending { width: calc(100% - 109px); font-size: .54rem; }
-  .registered-card-actions > button { min-width: 0; padding-inline: 6px; font-size: .54rem; }
+  .registered-card { padding: 9px; }
+  .registered-card-summary { grid-template-columns: 34px minmax(0,1fr) auto; gap: 7px; }
+  .registered-card-summary .card-brand-accent { width: 34px; height: 34px; }
+  .registered-card-copy h3 { font-size: .75rem; }
+  .registered-card-copy p { font-size: .51rem; }
+  .registered-card-total { min-width: 68px; }
+  .registered-card-total strong { font-size: .73rem; }
+  .registered-card-actions { gap: 5px; }
+  .registered-card-actions > button { padding-inline: 7px; font-size: .51rem; }
+  .registered-card-actions > button.registered-card-toggle { min-width: 82px; }
   .registered-card-actions > button svg { width: 13px; height: 13px; flex-basis: 13px; }
 }
