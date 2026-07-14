@@ -2163,8 +2163,16 @@ function payablesCardGroups() {
 }
 
 function payablesCardGroupTemplate(group) {
-  const expanded = payablesExpandedCardIds.has(group.card.id);
+  const registeredCard = group.context === "registered";
+  const expanded = registeredCard ? expandedRegisteredCardId === group.card.id : payablesExpandedCardIds.has(group.card.id);
   const count = group.items.length;
+  const payButton = group.total > 0
+    ? `<button type="button" class="payable-pay-button" ${registeredCard ? "data-pay-invoice" : "data-pay-payables-card"}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>`
+    : "";
+  const optionsMenu = registeredCard
+    ? `<details class="receivable-options payable-options"><summary aria-label="Mais opções de ${escapeAttribute(group.card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(group.card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(group.card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(group.card.id)}">Excluir</button></div></details>`
+    : `<details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>`;
+  const toggleAttribute = registeredCard ? "data-toggle-registered-card" : "data-toggle-payables-card";
   return `
     <article class="payables-card-group ${expanded ? "expanded" : ""}">
       <div class="payables-card-summary">
@@ -2174,9 +2182,8 @@ function payablesCardGroupTemplate(group) {
       </div>
       ${expanded ? `<div class="payables-installment-list">${group.items.map(payablesInstallmentRow).join("")}<div class="payables-installment-total"><b>Total do cartão</b><strong>${money(group.total)}</strong></div></div>` : ""}
       <div class="payables-card-actions">
-        <button type="button" class="payable-pay-button" data-pay-payables-card="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>
-        <details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>
-        <button type="button" class="payables-toggle-card" data-toggle-payables-card="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar parcelas" : "Ver parcelas"}</span></button>
+        ${payButton}${optionsMenu}
+        <button type="button" class="payables-toggle-card" ${toggleAttribute}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar parcelas" : "Ver parcelas"}</span></button>
       </div>
     </article>`;
 }
@@ -3205,7 +3212,7 @@ function cardTemplate() {
         <div class="cards-overview-progress" aria-label="${usage.toFixed(0)}% do limite utilizado"><span><i style="width:${usage}%"></i></span><b>${usage.toFixed(0)}%</b></div>
       </article>
       <div class="cards-section-heading"><h2>Cartões cadastrados</h2><span>${cards.length}</span></div>
-      <div class="registered-card-list">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>
+      <div class="payables-card-groups">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>
     </section>`;
 }
 
@@ -3329,35 +3336,16 @@ function purchaseFormTemplate(cards) {
 function cardRow(card) {
   const invoice = currentInvoice(card.id);
   const invoiceItems = currentCardInvoiceItems(card.id);
-  const pendingPurchases = invoiceItems.length;
-  const expanded = expandedRegisteredCardId === card.id;
-  const dueDate = cardInvoiceDueDate(card);
-  const dueDifference = Math.round((new Date(`${dueDate}T12:00:00`) - new Date(`${dateOffset()}T12:00:00`)) / 86400000);
-  const overdueDays = invoice > 0 ? Math.max(-dueDifference, 0) : 0;
-  const overdue = invoice > 0 && overdueDays > 0;
-  const accent = cardAccentClass(card);
-  const pendingLabel = pendingPurchases > 0 ? `${pendingPurchases} compra${pendingPurchases === 1 ? "" : "s"} pendente${pendingPurchases === 1 ? "" : "s"}` : "Nenhuma compra pendente";
-  const invoiceStatus = invoice <= 0
-    ? "Tudo em dia"
-    : overdue
-      ? `Atrasado ${overdueDays} dia${overdueDays === 1 ? "" : "s"}`
-      : dueDifference === 0
-        ? "Vence hoje"
-        : `Vence em ${dueDifference} dia${dueDifference === 1 ? "" : "s"}`;
-  const optionsMenu = `<details class="receivable-options card-options"><summary aria-label="Mais opções de ${escapeAttribute(card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(card.id)}">Excluir</button></div></details>`;
-  const toggleButton = `<button type="button" class="registered-card-toggle" data-toggle-registered-card="${escapeAttribute(card.id)}" aria-expanded="${expanded}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar compras" : "Ver compras"}</span></button>`;
-  return `
-    <article class="registered-card ${accent} ${overdue ? "overdue" : ""} ${expanded ? "expanded" : ""}">
-      <div class="registered-card-summary">
-        <i class="card-brand-accent ${accent}" aria-hidden="true"></i>
-        <div class="registered-card-copy"><h3>${escapeHtml(card.name)}</h3><p>${pendingLabel}</p></div>
-        <div class="registered-card-total"><small>Total</small><strong>${money(invoice)}</strong>${invoice > 0 ? `<span>${invoiceStatus}</span>` : ""}</div>
-      </div>
-      ${expanded ? `<div class="registered-card-purchases">${invoiceItems.length ? invoiceItems.map(cardInvoicePurchaseRow).join("") : `<p class="registered-card-empty">Nenhuma compra na fatura atual.</p>`}${invoiceItems.length ? `<div class="registered-card-purchases-total"><b>Total do cartão</b><strong>${money(invoice)}</strong></div>` : ""}</div>` : ""}
-      <div class="registered-card-actions">
-        ${invoice > 0 ? `<button type="button" class="pay-invoice" data-pay-invoice="${escapeAttribute(card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>${optionsMenu}${toggleButton}` : `${toggleButton}${optionsMenu}`}
-      </div>
-    </article>`;
+  const items = invoiceItems.map(({ purchase, info }) => {
+    const dueDate = installmentDueDate(purchase, info.current);
+    return {
+      purchase,
+      sourceInstallment: `${monthKey(dueDate)}-${info.current}`,
+      dueDate,
+      amount: info.value
+    };
+  });
+  return payablesCardGroupTemplate({ card, items, total: invoice, context: "registered" });
 }
 
 function currentCardInvoiceItems(cardId) {
@@ -3366,16 +3354,6 @@ function currentCardInvoiceItems(cardId) {
     .map(purchase => ({ purchase, info: installmentInfo(purchase) }))
     .filter(item => item.info.active && !item.info.paid)
     .sort((a, b) => installmentDueDate(a.purchase, a.info.current).localeCompare(installmentDueDate(b.purchase, b.info.current)));
-}
-
-function cardInvoicePurchaseRow({ purchase, info }) {
-  const dueDate = installmentDueDate(purchase, info.current);
-  return `
-    <div class="registered-card-purchase-row">
-      <i>${payableCategoryIconSvg(purchase.category)}</i>
-      <div><strong>${escapeHtml(purchase.name)}</strong><span>Parcela ${info.current}/${info.total} · Venc. ${formatDate(dueDate, true)}</span></div>
-      <b>${money(info.value)}</b>
-    </div>`;
 }
 
 function cardInvoiceDueDate(card) {
