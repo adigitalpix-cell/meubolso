@@ -2166,19 +2166,21 @@ function payablesCardGroupTemplate(group) {
   const registeredCard = group.context === "registered";
   const expanded = registeredCard ? expandedRegisteredCardId === group.card.id : payablesExpandedCardIds.has(group.card.id);
   const count = group.items.length;
+  const invoiceStatus = registeredCard ? cardInvoiceGroupStatus(group) : "";
+  const invoiceInTime = registeredCard && !invoiceStatus.startsWith("Vencida");
   const payButton = group.total > 0
-    ? `<button type="button" class="payable-pay-button" ${registeredCard ? "data-pay-invoice" : "data-pay-payables-card"}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar</span></button>`
+    ? `<button type="button" class="payable-pay-button" ${registeredCard ? "data-pay-invoice" : "data-pay-payables-card"}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>${registeredCard ? "Pagar Fatura" : "Pagar"}</span></button>`
     : "";
   const optionsMenu = registeredCard
     ? `<details class="receivable-options payable-options"><summary aria-label="Mais opções de ${escapeAttribute(group.card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(group.card.id)}">Editar</button><button type="button" data-adjust-card-limit="${escapeAttribute(group.card.id)}">Ajustar limite</button><button type="button" class="danger" data-delete-card="${escapeAttribute(group.card.id)}">Excluir</button></div></details>`
     : `<details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>`;
   const toggleAttribute = registeredCard ? "data-toggle-registered-card" : "data-toggle-payables-card";
   return `
-    <article class="payables-card-group ${expanded ? "expanded" : ""}">
+    <article class="payables-card-group ${registeredCard ? "registered-card-context" : ""} ${invoiceInTime ? "invoice-in-time" : ""} ${expanded ? "expanded" : ""}">
       <div class="payables-card-summary">
         <i>${payablesCardIcon()}</i>
         <div><h4>${escapeHtml(group.card.name)}</h4><p>${count} ${count === 1 ? "parcela pendente" : "parcelas pendentes"}</p></div>
-        <div class="payables-card-total"><small>Total</small><strong>${money(group.total)}</strong></div>
+        <div class="payables-card-total"><small>${registeredCard ? "Fatura atual" : "Total"}</small><strong>${money(group.total)}</strong>${registeredCard ? `<span>${invoiceStatus}</span>` : ""}</div>
       </div>
       ${expanded ? `<div class="payables-installment-list">${group.items.map(payablesInstallmentRow).join("")}<div class="payables-installment-total"><b>Total do cartão</b><strong>${money(group.total)}</strong></div></div>` : ""}
       <div class="payables-card-actions">
@@ -2186,6 +2188,15 @@ function payablesCardGroupTemplate(group) {
         <button type="button" class="payables-toggle-card" ${toggleAttribute}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? "Ocultar parcelas" : "Ver parcelas"}</span></button>
       </div>
     </article>`;
+}
+
+function cardInvoiceGroupStatus(group) {
+  if (group.total <= 0) return "Tudo em dia";
+  const dueDate = cardInvoiceDueDate(group.card);
+  const difference = Math.round((new Date(`${dueDate}T12:00:00`) - new Date(`${dateOffset()}T12:00:00`)) / 86400000);
+  if (difference < 0) return `Vencida há ${Math.abs(difference)} dia${difference === -1 ? "" : "s"}`;
+  if (difference === 0) return "Vence hoje";
+  return `Vence em ${difference} dia${difference === 1 ? "" : "s"}`;
 }
 
 function payablesInstallmentRow(item) {
@@ -3190,6 +3201,7 @@ function transactionFilterIconSvg(value) {
 
 function cardTemplate() {
   const cards = userCards();
+  const invoiceGroups = new Map(payablesCardGroups().map(group => [group.card.id, group]));
   const limit = totalCardLimit();
   const usedLimit = pendingPurchaseTotal();
   const availableLimit = availableCardLimit();
@@ -3212,7 +3224,7 @@ function cardTemplate() {
         <div class="cards-overview-progress" aria-label="${usage.toFixed(0)}% do limite utilizado"><span><i style="width:${usage}%"></i></span><b>${usage.toFixed(0)}%</b></div>
       </article>
       <div class="cards-section-heading"><h2>Cartões cadastrados</h2><span>${cards.length}</span></div>
-      <div class="payables-card-groups">${cards.map(cardRow).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>
+      <div class="payables-card-groups">${cards.map(card => cardRow(card, invoiceGroups.get(card.id))).join("") || `<div class="empty">Nenhum cartão cadastrado.</div>`}</div>
     </section>`;
 }
 
@@ -3333,27 +3345,8 @@ function purchaseFormTemplate(cards) {
     </form>`;
 }
 
-function cardRow(card) {
-  const invoice = currentInvoice(card.id);
-  const invoiceItems = currentCardInvoiceItems(card.id);
-  const items = invoiceItems.map(({ purchase, info }) => {
-    const dueDate = installmentDueDate(purchase, info.current);
-    return {
-      purchase,
-      sourceInstallment: `${monthKey(dueDate)}-${info.current}`,
-      dueDate,
-      amount: info.value
-    };
-  });
-  return payablesCardGroupTemplate({ card, items, total: invoice, context: "registered" });
-}
-
-function currentCardInvoiceItems(cardId) {
-  return userCardPurchases()
-    .filter(purchase => purchase.cardId === cardId)
-    .map(purchase => ({ purchase, info: installmentInfo(purchase) }))
-    .filter(item => item.info.active && !item.info.paid)
-    .sort((a, b) => installmentDueDate(a.purchase, a.info.current).localeCompare(installmentDueDate(b.purchase, b.info.current)));
+function cardRow(card, invoiceGroup) {
+  return payablesCardGroupTemplate({ ...(invoiceGroup || { card, items: [], total: 0 }), context: "registered" });
 }
 
 function cardInvoiceDueDate(card) {
@@ -5779,10 +5772,11 @@ async function payOverdueCardGroup(cardId) {
 
 async function payCardInvoice(cardId) {
   if (isMaster()) return;
-  const pending = userCardPurchases().filter(purchase => purchase.cardId === cardId).map(purchase => ({ purchase, info: installmentInfo(purchase) })).filter(item => item.info.active && !item.info.paid);
-  const total = pending.reduce((sum, item) => sum + item.info.value, 0);
+  const group = payablesCardGroups().find(entry => entry.card.id === cardId);
+  const pending = group?.items || [];
+  const total = Number(group?.total || 0);
   if (!pending.length || total <= 0) return showToast("Não há fatura pendente para este cartão.");
-  const card = userCards().find(item => item.id === cardId);
+  const card = group.card;
   const paymentMethod = await requestPaymentMethod({
     type: "expense",
     name: `Fatura do cartão ${card?.name || "Cartão"}`,
@@ -5795,21 +5789,24 @@ async function payCardInvoice(cardId) {
   if (!paymentMethod) return;
   const paidAt = nowParts();
   const account = card?.name || "Cartão";
-  pending.forEach(({ purchase, info }) => {
+  pending.forEach(item => {
+    const purchase = item.purchase;
+    const key = item.sourceInstallment;
     purchase.paidInstallments ||= [];
     purchase.installmentPayments ||= {};
-    purchase.installmentPayments[info.key] = {
+    purchase.installmentPayments[key] = {
       paidDate: paidAt.date,
       paidTime: paidAt.time,
       paymentMethod,
       account
     };
-    if (!purchase.paidInstallments.includes(info.key)) purchase.paidInstallments.push(info.key);
+    if (!purchase.paidInstallments.includes(key)) purchase.paidInstallments.push(key);
     syncPaidInstallmentTransactions(purchase);
   });
+  const purchases = [...new Map(pending.map(item => [item.purchase.id, item.purchase])).values()];
   try {
-    await Promise.all(pending.map(({ purchase }) => savePurchaseToSupabase(purchase)));
-    const installmentTransactions = (db.transactions[session] || []).filter(item => pending.some(({ purchase }) => item.sourcePurchaseId === purchase.id));
+    await Promise.all(purchases.map(savePurchaseToSupabase));
+    const installmentTransactions = (db.transactions[session] || []).filter(item => purchases.some(purchase => item.sourcePurchaseId === purchase.id));
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
     await refreshUserFinancialData();
   } catch (error) {
