@@ -91,6 +91,7 @@ let selectedPurchaseId = null;
 let dashboardDetail = null;
 let receivablesReturnView = "home";
 let receivedIncomeReturnView = "home";
+let paidExpenseReturnView = "home";
 let payablesExpandedCardIds = new Set();
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
@@ -1930,6 +1931,7 @@ function toggleBalanceInfoPopover(button) {
 function dashboardDetailTemplate(type) {
   if (type === "toReceive") return receivablesDetailTemplate();
   if (type === "received") return receivedIncomeDetailTemplate();
+  if (type === "paid") return paidExpenseDetailTemplate();
   if (type === "toPay") return payablesDetailTemplate();
   const title = ({
     invoice: "Fatura detalhada",
@@ -2169,6 +2171,44 @@ function receivedIncomeCard(item) {
       <b class="received-date-badge"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="m5.5 9 2.2 2.2 4.8-5"/></svg><span>Recebido em ${formatDate(receivedDate, true)}</span></b>
       <div class="receivable-actions received-income-actions">
         <details class="receivable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button></div></details>
+      </div>
+    </article>`;
+}
+
+function paidExpenseDetailTemplate() {
+  const items = paidExpenseItems();
+  const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const currentMonth = monthKey();
+  return `
+    <section class="dashboard-detail-page receivables-page received-income-page paid-expense-page">
+      <button class="receivables-back-header" data-close-paid-expenses aria-label="Voltar para a tela anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Despesas Pagas</strong><small>Confira suas despesas pagas no mês.</small></span>
+      </button>
+      <section class="receivables-section current received-income-section paid-expense-section">
+        <header><i class="receivables-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8 12 2.7 2.7L16.5 9"/></svg></i><div class="receivables-section-title"><span>Pago no mês</span><h2>Despesas Pagas</h2></div><div class="receivables-total"><small>Total pago</small><strong>${money(total)}</strong></div></header>
+        <div class="receivables-month-group"><h3>${escapeHtml(payablesMonthLabel(currentMonth))}</h3><div class="receivables-list">${items.length ? items.map(paidExpenseCard).join("") : `<div class="receivables-empty">Nenhuma despesa paga neste mês.</div>`}</div></div>
+      </section>
+    </section>`;
+}
+
+function paidExpenseItems() {
+  const currentMonth = monthKey();
+  return dashboardTransactions()
+    .filter(item => item.type !== "income" && isPaidStatus(item) && paidMonthKey(item) === currentMonth)
+    .sort(compareTransactionsNewestFirst);
+}
+
+function paidExpenseCard(item) {
+  const paidDate = item.paidDate || item.dueDate;
+  const purchaseActions = item.source === "card-installment-virtual";
+  return `
+    <article class="receivable-card received-income-card paid-expense-card">
+      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Pagamento: ${formatDate(paidDate, true)}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
+      <div class="receivable-value"><strong>${money(item.amount)}</strong><span>Pago</span></div>
+      <b class="received-date-badge paid-date-badge"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="m5.5 9 2.2 2.2 4.8-5"/></svg><span>Pago em ${formatDate(paidDate, true)}</span></b>
+      <div class="receivable-actions received-income-actions paid-expense-actions">
+        <details class="receivable-options"><summary aria-label="Mais opções"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div>${purchaseActions ? `<button data-edit-purchase="${escapeAttribute(item.sourcePurchaseId)}">Editar</button><button class="danger" data-delete-purchase="${escapeAttribute(item.sourcePurchaseId)}">Excluir</button>` : `<button data-edit-transaction="${escapeAttribute(item.id)}">Editar</button><button class="danger" data-delete-transaction="${escapeAttribute(item.id)}">Excluir</button>`}</div></details>
       </div>
     </article>`;
 }
@@ -3492,6 +3532,7 @@ function bindAppEvents() {
   document.querySelectorAll("[data-dashboard-detail]").forEach(button => button.addEventListener("click", async () => {
     const detail = button.dataset.dashboardDetail;
     if (detail === "received") receivedIncomeReturnView = currentView;
+    if (detail === "paid") paidExpenseReturnView = currentView;
     if (detail === "toReceive" && !isMaster()) {
       receivablesReturnView = currentView;
       try {
@@ -3549,6 +3590,11 @@ function bindAppEvents() {
   document.querySelector("[data-close-received-income]")?.addEventListener("click", () => {
     dashboardDetail = null;
     currentView = receivedIncomeReturnView;
+    render();
+  });
+  document.querySelector("[data-close-paid-expenses]")?.addEventListener("click", () => {
+    dashboardDetail = null;
+    currentView = paidExpenseReturnView;
     render();
   });
   document.querySelector("[data-close-payables]")?.addEventListener("click", () => {
