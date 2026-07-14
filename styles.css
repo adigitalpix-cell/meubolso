@@ -806,7 +806,9 @@ button { cursor: pointer; }
 .payables-card-total { min-width: 74px; text-align: right; }
 .payables-card-total small { display: block; color: #777d7a; font-size: .57rem; }
 .payables-card-total strong { display: block; margin-top: 2px; color: #df172a; font-size: .83rem; white-space: nowrap; }
-.payables-installment-list { padding: 5px 9px; display: grid; border: 1px solid #eee5e5; border-radius: 15px; background: #fffafa; }
+.payables-installment-list { max-height: 282px; padding: 5px 9px; display: grid; overflow-y: auto; overscroll-behavior: contain; border: 1px solid #eee5e5; border-radius: 15px; background: #fffafa; scrollbar-width: thin; scrollbar-color: #e5aeb4 transparent; }
+.payables-installment-list::-webkit-scrollbar { width: 5px; }
+.payables-installment-list::-webkit-scrollbar-thumb { border-radius: 99px; background: #e5aeb4; }
 .payables-installment-row { min-width: 0; padding: 9px 0; display: grid; grid-template-columns: 31px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-bottom: 1px solid #eee4e4; }
 .payables-installment-row > i { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 10px; color: #d61b2d; background: #ffecef; }
 .payables-installment-row > i svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

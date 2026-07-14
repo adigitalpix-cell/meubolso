@@ -2050,15 +2050,19 @@ function payableExpenseCard(item, overdue) {
 
 function payablesCardGroups() {
   const groups = new Map();
-  cardInstallmentItems().filter(item => !isPaidStatus(item)).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).forEach(item => {
-    const purchase = userCardPurchases().find(entry => entry.id === item.sourcePurchaseId);
-    const card = userCards().find(entry => entry.id === purchase?.cardId);
-    if (!purchase || !card) return;
-    const group = groups.get(card.id) || { card, items: [], total: 0 };
-    group.items.push({ ...item, purchase });
-    group.total += Number(item.amount || 0);
-    groups.set(card.id, group);
-  });
+  const currentMonth = monthKey();
+  cardInstallmentItems()
+    .filter(item => !isPaidStatus(item) && dueMonthKey(item) === currentMonth)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .forEach(item => {
+      const purchase = userCardPurchases().find(entry => entry.id === item.sourcePurchaseId);
+      const card = userCards().find(entry => entry.id === purchase?.cardId);
+      if (!purchase || !card) return;
+      const group = groups.get(card.id) || { card, items: [], total: 0 };
+      group.items.push({ ...item, purchase });
+      group.total += Number(item.amount || 0);
+      groups.set(card.id, group);
+    });
   return [...groups.values()].sort((a, b) => a.card.name.localeCompare(b.card.name, "pt-BR"));
 }
 
