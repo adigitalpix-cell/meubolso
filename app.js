@@ -2173,9 +2173,10 @@ function payablesCardGroupTemplate(group) {
     ? `<button type="button" class="payable-pay-button" ${registeredCard ? "data-pay-invoice" : "data-pay-payables-card"}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>${registeredCard ? "Pagar Fatura" : "Pagar"}</span></button>`
     : "";
   const optionsMenu = registeredCard
-    ? `<details class="receivable-options payable-options"><summary aria-label="Mais opções de ${escapeAttribute(group.card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-edit-card="${escapeAttribute(group.card.id)}">Editar</button><button type="button" class="danger" data-delete-card="${escapeAttribute(group.card.id)}">Excluir</button></div></details>`
+    ? `<details class="receivable-options payable-options"><summary aria-label="Mais opções de ${escapeAttribute(group.card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir Compras</button><button type="button" data-edit-card="${escapeAttribute(group.card.id)}">Editar</button><button type="button" class="danger" data-delete-card="${escapeAttribute(group.card.id)}">Excluir</button></div></details>`
     : `<details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>`;
   const toggleAttribute = registeredCard ? "data-toggle-registered-card" : "data-toggle-payables-card";
+  const toggleButton = `<button type="button" class="payables-toggle-card" ${toggleAttribute}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? (registeredCard ? "Ocultar compras" : "Ocultar parcelas") : (registeredCard ? "Ver compras" : "Ver parcelas")}</span></button>`;
   return `
     <article class="payables-card-group ${registeredCard ? "registered-card-context" : ""} ${invoiceInTime ? "invoice-in-time" : ""} ${invoiceOverdue ? "invoice-overdue" : ""} ${expanded ? "expanded" : ""}">
       <div class="payables-card-summary">
@@ -2185,8 +2186,7 @@ function payablesCardGroupTemplate(group) {
       </div>
       ${expanded ? `<div class="payables-installment-list">${group.items.map(payablesInstallmentRow).join("")}<div class="payables-installment-total"><b>Total do cartão</b><strong>${money(group.total)}</strong></div></div>` : ""}
       <div class="payables-card-actions">
-        ${registeredCard ? `<span class="registered-card-pay-slot">${payButton}</span>${optionsMenu}` : `${payButton}${optionsMenu}`}
-        <button type="button" class="payables-toggle-card" ${toggleAttribute}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? (registeredCard ? "Ocultar compras" : "Ocultar parcelas") : (registeredCard ? "Ver compras" : "Ver parcelas")}</span></button>
+        ${registeredCard ? `${payButton}${toggleButton}${optionsMenu}` : `${payButton}${optionsMenu}${toggleButton}`}
       </div>
     </article>`;
 }
