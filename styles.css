@@ -341,6 +341,76 @@ button { cursor: pointer; }
 .receivable-options button:hover { background: #e3efe9; }
 .receivable-options button.danger { color: var(--red); background: var(--red-soft); }
 .receivables-empty { padding: 17px 10px; border-radius: 13px; color: var(--muted); background: #f1f4f2; font-size: 11px; text-align: center; }
+
+/* Compras do cartão · MB C2 */
+.card-purchases-page { gap: 15px; padding-bottom: 12px; }
+.card-purchases-page > .receivables-back-header { margin-bottom: 0; }
+.card-purchases-hero {
+  min-width: 0;
+  padding: 17px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(211,255,125,.25);
+  border-radius: 22px;
+  color: #fff;
+  background: radial-gradient(circle at 12% 20%,rgba(211,255,105,.2),transparent 30%),linear-gradient(135deg,#10513e,#062b21 72%);
+  box-shadow: 0 13px 30px rgba(9,60,45,.2), inset 0 1px 0 rgba(255,255,255,.07);
+}
+.card-purchases-hero > div { min-width: 0; }
+.card-purchases-hero span { display: block; color: var(--lime); font-size: 8px; font-weight: 950; letter-spacing: 1.15px; text-transform: uppercase; }
+.card-purchases-hero h2 { margin: 4px 0 0; overflow: hidden; color: #fff; font-size: 16px; letter-spacing: -.35px; text-overflow: ellipsis; white-space: nowrap; }
+.card-purchases-total { text-align: right; }
+.card-purchases-total small { display: block; color: #c5d8d1; font-size: 8px; font-weight: 800; }
+.card-purchases-total strong { display: block; margin-top: 4px; color: var(--lime); font-size: 18px; font-weight: 950; white-space: nowrap; }
+.card-purchase-section { min-width: 0; display: grid; gap: 8px; }
+.card-purchase-section > header { padding: 0 4px; display: flex; align-items: center; gap: 9px; }
+.card-purchase-section > header h3 { margin: 0; color: #244f40; font-size: 11px; font-weight: 950; letter-spacing: .35px; text-transform: uppercase; }
+.card-purchase-section > header::after { content: ""; height: 1px; flex: 1; background: #dce7e2; }
+.card-purchase-section > header span { order: 2; min-width: 23px; padding: 4px 7px; border-radius: 999px; color: #15563f; background: #e7f3ed; font-size: 9px; font-weight: 900; text-align: center; }
+.card-purchase-list { min-width: 0; display: grid; gap: 7px; }
+.card-purchases-empty { padding: 18px 12px; border: 1px dashed #d9e6df; border-radius: 15px; color: #687871; background: #f3f7f5; font-size: 11px; text-align: center; }
+.card-purchase-card {
+  position: relative;
+  min-width: 0;
+  padding: 11px 12px;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 7px 10px;
+  overflow: visible;
+  border: 1px solid #dfeae5;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 5px 13px rgba(17,47,39,.05);
+}
+.card-purchase-card.paid { border-color: #d9e8e0; background: linear-gradient(135deg,#fff,#f9fcfa); }
+.card-purchase-copy { min-width: 0; }
+.card-purchase-copy h4 { margin: 0; overflow: hidden; color: var(--green-dark); font-size: 13px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.card-purchase-copy p, .card-purchase-copy small { display: block; margin: 3px 0 0; color: #6e7a76; font-size: 9px; line-height: 1.25; }
+.card-purchase-value { min-width: 78px; text-align: right; }
+.card-purchase-side { min-width: max-content; grid-column: 2; grid-row: 1; align-self: start; display: grid; justify-items: end; gap: 6px; }
+.card-purchase-value strong { display: block; color: var(--green); font-size: 14px; font-weight: 950; white-space: nowrap; }
+.card-purchase-value span { width: max-content; margin: 4px 0 0 auto; padding: 3px 7px; display: block; border-radius: 999px; color: #28634e; background: #e2f5df; font-size: 7px; font-weight: 950; text-transform: uppercase; }
+.card-purchase-value span.pending { color: #835c13; background: #fff0cf; }
+.card-purchase-value span.overdue { color: #a52222; background: #ffe4e1; }
+.card-purchase-paid-date { width: max-content; max-width: 100%; grid-column: 1; align-self: center; padding: 4px 7px; border-radius: 999px; color: #236048; background: #e4f4e6; font-size: 8px; font-weight: 900; text-transform: uppercase; }
+.card-purchase-actions { min-width: max-content; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.card-purchase-options { z-index: 26; }
+.card-purchase-options > div { z-index: 30; min-width: 150px; }
+.card-purchase-section:last-child .card-purchase-list > .card-purchase-card:last-child .card-purchase-options > div { top: auto; bottom: 34px; }
+
+@media (max-width: 380px) {
+  .card-purchases-page .receivables-back-header strong { font-size: 19px; }
+  .card-purchases-hero { padding: 15px 13px; }
+  .card-purchases-hero h2 { font-size: 14px; }
+  .card-purchases-total strong { font-size: 16px; }
+  .card-purchase-card { padding: 10px; gap: 7px 8px; }
+  .card-purchase-value { min-width: 70px; }
+  .card-purchase-value strong { font-size: 12px; }
+  .card-purchase-actions .receive-compact-action { padding-inline: 8px; }
+}
 .received-income-section > header { background: radial-gradient(circle at 12% 20%,rgba(212,243,107,.2),transparent 30%),linear-gradient(135deg,#124536,#062b21); }
 .received-income-card { border-color: #dce9e3; background: #fff; }
 .received-income-card .receivable-value span { color: #245f49; background: #e2f5df; }

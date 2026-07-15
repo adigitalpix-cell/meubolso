@@ -3234,31 +3234,65 @@ function cardPurchasesTemplate() {
   if (!selectedCardId && cards.length) selectedCardId = cards[0].id;
   if (selectedCardId && !cards.some(card => card.id === selectedCardId)) selectedCardId = cards[0]?.id || null;
   const selectedCard = cards.find(card => card.id === selectedCardId);
-  const purchases = userCardPurchases().filter(purchase => !selectedCardId || purchase.cardId === selectedCardId);
-  const pendingPurchases = purchases
-    .filter(purchaseHasOpenInstallment)
-    .sort((a, b) => (nextPendingInstallment(a)?.dueDate || "").localeCompare(nextPendingInstallment(b)?.dueDate || ""));
-  const paidThisMonth = purchases
-    .filter(purchasePaidThisMonth)
-    .sort((a, b) => {
-      const paidA = latestMonthlyPayment(a);
-      const paidB = latestMonthlyPayment(b);
-      return `${paidB?.paidDate || ""} ${paidB?.paidTime || ""}`.localeCompare(`${paidA?.paidDate || ""} ${paidA?.paidTime || ""}`);
-    });
+  const purchasesById = new Map(userCardPurchases().map(purchase => [purchase.id, purchase]));
+  const selectedCardInstallments = cardInstallmentItems()
+    .map(item => {
+      const purchase = purchasesById.get(item.sourcePurchaseId);
+      if (!purchase || purchase.cardId !== selectedCardId) return null;
+      const payment = purchase.installmentPayments?.[item.sourceInstallment] || {};
+      return {
+        purchase,
+        key: item.sourceInstallment,
+        number: Number(item.sourceInstallment.split("-").pop()) || 1,
+        total: purchase.installments,
+        value: Number(item.amount || 0),
+        paid: isPaidStatus(item),
+        overdue: !isPaidStatus(item) && item.dueDate < dateOffset(),
+        competence: dueMonthKey(item),
+        payment
+      };
+    })
+    .filter(Boolean);
+  const expectedInvoiceMonth = monthKey(invoiceClosingDate(selectedCard?.id));
+  const availableInvoiceMonths = [...new Set(selectedCardInstallments.map(item => item.competence))]
+    .filter(competence => competence >= expectedInvoiceMonth)
+    .sort();
+  const currentInvoiceMonth = availableInvoiceMonths.includes(expectedInvoiceMonth)
+    ? expectedInvoiceMonth
+    : availableInvoiceMonths[0] || expectedInvoiceMonth;
+  const currentInvoiceItems = selectedCardInstallments
+    .filter(item => item.competence === currentInvoiceMonth)
+    .sort((a, b) => a.purchase.name.localeCompare(b.purchase.name, "pt-BR"));
+  const invoiceTotal = currentInvoiceItems.reduce((sum, item) => sum + item.value, 0);
   if (!selectedCard) return `<div class="page-title"><span class="eyebrow">Compras</span><h1>Nenhum cartão</h1><p>Cadastre um cartão para lançar compras.</p></div><button class="primary-button" data-view="card">Voltar para cartões</button>`;
   return `
-    <div class="page-title"><span class="eyebrow">Compras do cartão</span><h1>Compras - ${escapeHtml(selectedCard.name)}</h1><p>Gerencie compras, parcelas e pagamentos deste cartão.</p></div>
-    <article class="mini-card selected">
-      <div><strong>${escapeHtml(selectedCard.name)}</strong><span>${escapeHtml(selectedCard.brand)} · Fatura ${money(currentInvoice(selectedCard.id))}</span></div>
-      <small>Limite disponível: ${money(availableCardLimit(selectedCard.id))}</small>
-    </article>
-    <div class="card-actions-row single">
-      <button class="secondary-button" data-view="card">Voltar</button>
-    </div>
-    <div class="section-header"><h2>A Pagar</h2><span class="list-count">${pendingPurchases.length}</span></div>
-    <div class="purchase-list">${pendingPurchases.map(purchaseRow).join("") || `<div class="empty">Nenhuma compra com parcela pendente.</div>`}</div>
-    <div class="section-header"><h2>Pagas no Mês</h2><span class="list-count">${paidThisMonth.length}</span></div>
-    <div class="purchase-list">${paidThisMonth.map(purchaseRow).join("") || `<div class="empty">Nenhuma parcela paga neste mês.</div>`}</div>`;
+    <section class="dashboard-detail-page receivables-page card-purchases-page">
+      <button class="receivables-back-header" data-view="card" aria-label="Voltar para cartões">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Compras - ${escapeHtml(selectedCard.name)}</strong><small>Gerencie compras, parcelas e pagamentos deste cartão.</small></span>
+      </button>
+      <article class="card-purchases-hero">
+        <div><span>Fatura atual</span><h2>Compras - ${escapeHtml(selectedCard.name)}</h2></div>
+        <div class="card-purchases-total"><small>Total da fatura</small><strong>${money(invoiceTotal)}</strong></div>
+      </article>
+      ${cardPurchaseSection("Fatura atual", currentInvoiceItems, selectedCard)}
+    </section>`;
+}
+
+function cardPurchaseSection(title, installments, card) {
+  return `
+    <section class="card-purchase-section current">
+      <header><h3>${title}</h3><span>${installments.length}</span></header>
+      <div class="card-purchase-list">${installments.length
+        ? installments.map(item => purchaseInstallmentCard(item, card)).join("")
+        : `<div class="card-purchases-empty">Nenhuma compra na fatura atual.</div>`}
+      </div>
+    </section>`;
+}
+
+function cardDueDayLabel(card) {
+  const dueDay = Math.min(Math.max(Number(card?.dueDay || 1), 1), 31);
+  return String(dueDay).padStart(2, "0");
 }
 
 function purchaseHasOpenInstallment(purchase) {
@@ -3365,28 +3399,31 @@ function cardAccentClass(card) {
   return "default";
 }
 
-function purchaseRow(purchase) {
-  const card = userCards().find(item => item.id === purchase.cardId);
-  const info = installmentInfo(purchase);
-  const nextPending = nextPendingInstallment(purchase);
-  const monthlyPayment = latestMonthlyPayment(purchase);
-  const paidCount = (purchase.paidInstallments || []).length;
-  const status = allInstallmentsPaid(purchase) ? "Quitada" : info.paid ? "Parcela do mês paga" : "Parcela pendente";
+function purchaseInstallmentCard(item, card) {
+  const purchase = item.purchase;
+  const installmentNumber = item.number;
+  const installmentKey = item.key;
+  const paymentDate = item.payment?.paidDate || "";
+  const status = item.paid ? "Pago" : item.overdue ? "Atrasado" : "Pendente";
   return `
-    <article class="purchase-row ${info.paid ? "paid" : ""}">
-      <div class="purchase-main">
-        <div><strong>${escapeHtml(purchase.name)}</strong><span>${escapeHtml(card?.name || "Cartão")} · ${formatDate(purchase.purchaseDate, true)}</span></div>
-        <b>${money(info.value)}</b>
+    <article class="card-purchase-card ${item.paid ? "paid" : item.overdue ? "overdue" : "pending"}">
+      <div class="card-purchase-copy">
+        <h4>${escapeHtml(purchase.name)}</h4>
+        <p>Parcela ${installmentNumber}/${item.total}</p>
+        <small>Vencimento: dia ${cardDueDayLabel(card)}</small>
+        <small>${escapeHtml(card?.name || "Cartão")}</small>
       </div>
-      <small>Status: ${status} · Pagas ${paidCount}/${info.total} · Parcela ${info.total}x</small>
-      ${nextPending ? `<small>Próxima pendente: ${nextPending.number}/${info.total} · Vence em ${formatDate(nextPending.dueDate, true)}</small>` : `<small>Próxima pendente: nenhuma</small>`}
-      ${monthlyPayment ? `<small>Paga no mês: ${formatDate(monthlyPayment.paidDate, true)} ${escapeHtml(monthlyPayment.paidTime || "")}</small>` : ""}
-      <div class="row-actions">
-        ${nextPending ? `<button type="button" data-pay-installment="${purchase.id}" data-installment-key="${nextPending.key}">Marcar parcela como paga</button>` : ""}
-        <button type="button" data-view-installments="${purchase.id}">Ver parcelas</button>
-        <button type="button" data-edit-purchase="${purchase.id}">Editar</button>
-        <button type="button" class="danger" data-delete-purchase="${purchase.id}">Excluir</button>
+      <div class="card-purchase-side">
+      <div class="card-purchase-value">
+        <strong>${money(item.value)}</strong>
+        <span class="${item.paid ? "paid" : item.overdue ? "overdue" : "pending"}">${status}</span>
       </div>
+      <div class="card-purchase-actions">
+        ${item.paid ? "" : `<button type="button" class="receive-compact-action" data-pay-card-purchase-installment="${escapeAttribute(purchase.id)}" data-installment-key="${escapeAttribute(installmentKey)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar Parcela</span></button>`}
+        <details class="receivable-options card-purchase-options"><summary aria-label="Mais opções de ${escapeAttribute(purchase.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-view-installments="${escapeAttribute(purchase.id)}">Abrir parcelas</button><button type="button" data-edit-purchase="${escapeAttribute(purchase.id)}">Editar compra</button><button type="button" class="danger" data-delete-purchase="${escapeAttribute(purchase.id)}">Excluir compra</button></div></details>
+      </div>
+      </div>
+      ${item.paid && paymentDate ? `<b class="card-purchase-paid-date">Pago em ${formatDate(paymentDate, true)}</b>` : ""}
     </article>`;
 }
 
@@ -4161,6 +4198,7 @@ function bindAppEvents() {
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
+  document.querySelectorAll("[data-pay-card-purchase-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payCardPurchaseInstallment, button.dataset.installmentKey, { requestMethod: true })));
   document.querySelectorAll("[data-edit-installment-date]").forEach(button => button.addEventListener("click", () => openInstallmentDateDialog(
     button.dataset.editInstallmentDate,
     Number(button.dataset.installmentNumber),
@@ -5623,7 +5661,7 @@ async function deletePurchaseCascade(purchaseId) {
 
 async function payCardInstallment(purchaseId, installmentKey = null, options = {}) {
   if (isMaster()) return;
-  if (!options.fromNotification && !await confirmAction()) return;
+  if (!options.fromNotification && !options.requestMethod && !await confirmAction()) return;
   const purchase = userCardPurchases().find(item => item.id === purchaseId);
   if (!purchase) return showToast("Não foi possível concluir a operação.");
   const info = installmentInfo(purchase);
@@ -5634,12 +5672,12 @@ async function payCardInstallment(purchaseId, installmentKey = null, options = {
   const card = userCards().find(item => item.id === purchase.cardId);
   const installmentNumber = Number(String(key).split("-").pop()) || 1;
   let paymentMethod = "Cartão";
-  if (options.fromNotification) {
+  if (options.fromNotification || options.requestMethod) {
     paymentMethod = await requestPaymentMethod({
       type: "expense",
-      name: `${card?.name || "Cartão"} · ${purchase.name} · Parcela ${installmentNumber}/${purchase.installments}`,
+      name: `${purchase.name} · Parcela ${installmentNumber}/${purchase.installments}`,
       amount: Number(purchase.amount || 0) / Number(purchase.installments || 1),
-      dueDate: installmentDueDate(purchase, installmentNumber)
+      dueDate: cardInvoiceDueDate(card || {})
     }, {
       eyebrow: "Confirmar pagamento da parcela",
       title: "Marcar parcela como paga"
