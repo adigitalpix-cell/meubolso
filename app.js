@@ -4160,6 +4160,61 @@ async function registerUser(event) {
   render();
 }
 
+const SHARED_OPTIONS_MENU_SELECTOR = ".receivable-options, .category-options";
+const SHARED_OPTIONS_MENU_OPEN_SELECTOR = ".receivable-options[open], .category-options[open]";
+
+function clearSharedOptionsMenuPosition(menu) {
+  menu.classList.remove("adaptive-menu-up", "adaptive-menu-down");
+  const panel = menu.querySelector(":scope > div");
+  if (!panel) return;
+  panel.style.removeProperty("max-height");
+  panel.style.removeProperty("overflow-y");
+  panel.style.removeProperty("transform");
+}
+
+function positionSharedOptionsMenu(menu) {
+  if (!menu?.open) return;
+  const summary = menu.querySelector(":scope > summary");
+  const panel = menu.querySelector(":scope > div");
+  if (!summary || !panel) return;
+
+  clearSharedOptionsMenuPosition(menu);
+  const safeMargin = 12;
+  const menuGap = 5;
+  const viewportHeight = window.innerHeight;
+  const bottomNavTop = document.querySelector(".bottom-nav")?.getBoundingClientRect().top ?? viewportHeight;
+  const safeBottom = Math.min(viewportHeight, bottomNavTop) - safeMargin;
+  const summaryRect = summary.getBoundingClientRect();
+  const panelHeight = panel.scrollHeight;
+  const spaceBelow = Math.max(0, safeBottom - summaryRect.bottom - menuGap);
+  const spaceAbove = Math.max(0, summaryRect.top - safeMargin - menuGap);
+  const opensUp = panelHeight > spaceBelow && spaceAbove > spaceBelow;
+  const availableHeight = opensUp ? spaceAbove : spaceBelow;
+
+  menu.classList.add(opensUp ? "adaptive-menu-up" : "adaptive-menu-down");
+  panel.style.maxHeight = `${availableHeight}px`;
+  panel.style.overflowY = panelHeight > availableHeight ? "auto" : "visible";
+
+  const panelRect = panel.getBoundingClientRect();
+  const appRect = document.querySelector("#app")?.getBoundingClientRect();
+  const safeLeft = Math.max(safeMargin, (appRect?.left ?? 0) + safeMargin);
+  const safeRight = Math.min(window.innerWidth - safeMargin, (appRect?.right ?? window.innerWidth) - safeMargin);
+  let horizontalShift = 0;
+  if (panelRect.left < safeLeft) horizontalShift = safeLeft - panelRect.left;
+  if (panelRect.right + horizontalShift > safeRight) {
+    horizontalShift += safeRight - (panelRect.right + horizontalShift);
+  }
+  if (horizontalShift) panel.style.transform = `translateX(${horizontalShift}px)`;
+}
+
+function scheduleSharedOptionsMenuPosition() {
+  if (bindAppEvents.sharedOptionsPositionFrame) return;
+  bindAppEvents.sharedOptionsPositionFrame = requestAnimationFrame(() => {
+    bindAppEvents.sharedOptionsPositionFrame = null;
+    document.querySelectorAll(SHARED_OPTIONS_MENU_OPEN_SELECTOR).forEach(positionSharedOptionsMenu);
+  });
+}
+
 function bindAppEvents() {
   document.querySelectorAll("[data-home-overview-tab]").forEach(button => button.addEventListener("click", () => {
     const tab = button.dataset.homeOverviewTab;
@@ -4327,36 +4382,27 @@ function bindAppEvents() {
     render();
   }));
   document.querySelectorAll("[data-pay-overdue-card]").forEach(button => button.addEventListener("click", () => payOverdueCardGroup(button.dataset.payOverdueCard)));
-  const receivableMenus = [...document.querySelectorAll(".receivable-options")];
-  receivableMenus.forEach(menu => {
+  const sharedOptionsMenus = [...document.querySelectorAll(SHARED_OPTIONS_MENU_SELECTOR)];
+  sharedOptionsMenus.forEach(menu => {
     menu.addEventListener("toggle", () => {
-      if (!menu.open) return;
-      receivableMenus.forEach(other => {
+      if (!menu.open) return clearSharedOptionsMenuPosition(menu);
+      document.querySelectorAll(SHARED_OPTIONS_MENU_OPEN_SELECTOR).forEach(other => {
         if (other !== menu) other.open = false;
       });
+      scheduleSharedOptionsMenuPosition();
     });
     menu.addEventListener("click", event => {
       if (event.target.closest("button")) menu.open = false;
     });
   });
-  if (!bindAppEvents.receivableMenuOutsideBound) {
+  if (!bindAppEvents.sharedOptionsMenuOutsideBound) {
     document.addEventListener("click", event => {
-      if (event.target.closest(".receivable-options")) return;
-      document.querySelectorAll(".receivable-options[open]").forEach(menu => { menu.open = false; });
+      if (event.target.closest(SHARED_OPTIONS_MENU_SELECTOR)) return;
+      document.querySelectorAll(SHARED_OPTIONS_MENU_OPEN_SELECTOR).forEach(menu => { menu.open = false; });
     });
-    bindAppEvents.receivableMenuOutsideBound = true;
-  }
-  const categoryMenus = [...document.querySelectorAll(".category-options")];
-  categoryMenus.forEach(menu => menu.addEventListener("toggle", () => {
-    if (!menu.open) return;
-    categoryMenus.forEach(other => { if (other !== menu) other.open = false; });
-  }));
-  if (!bindAppEvents.categoryMenuOutsideBound) {
-    document.addEventListener("click", event => {
-      if (event.target.closest(".category-options")) return;
-      document.querySelectorAll(".category-options[open]").forEach(menu => { menu.open = false; });
-    });
-    bindAppEvents.categoryMenuOutsideBound = true;
+    window.addEventListener("resize", scheduleSharedOptionsMenuPosition);
+    document.addEventListener("scroll", scheduleSharedOptionsMenuPosition, true);
+    bindAppEvents.sharedOptionsMenuOutsideBound = true;
   }
   document.querySelector("[data-new-category]")?.addEventListener("click", () => openCategoryDialog());
   document.querySelectorAll("[data-edit-category]").forEach(button => button.addEventListener("click", () => openCategoryDialog(button.dataset.editCategory)));

@@ -466,6 +466,24 @@ button { cursor: pointer; }
 .receivable-options button { min-height: 32px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--green-dark); background: #edf5f1; font-size: 9px; font-weight: 850; text-align: left; }
 .receivable-options button:hover { background: #e3efe9; }
 .receivable-options button.danger { color: var(--red); background: var(--red-soft); }
+.receivable-options.adaptive-menu-down > div,
+.category-options.adaptive-menu-down > div {
+  top: calc(100% + 5px) !important;
+  bottom: auto !important;
+}
+.receivable-options.adaptive-menu-up > div,
+.category-options.adaptive-menu-up > div {
+  top: auto !important;
+  bottom: calc(100% + 5px) !important;
+}
+.receivable-options.adaptive-menu-up > div,
+.receivable-options.adaptive-menu-down > div,
+.category-options.adaptive-menu-up > div,
+.category-options.adaptive-menu-down > div {
+  z-index: 80 !important;
+  max-width: calc(100vw - 24px);
+  overscroll-behavior: contain;
+}
 .receivables-empty { padding: 17px 10px; border-radius: 13px; color: var(--muted); background: #f1f4f2; font-size: 11px; text-align: center; }
 
 /* Compras do cartão · MB C2 */
