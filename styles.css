@@ -411,6 +411,49 @@ button { cursor: pointer; }
   .card-purchase-value strong { font-size: 12px; }
   .card-purchase-actions .receive-compact-action { padding-inline: 8px; }
 }
+
+/* Histórico de parcelas · MB C2 */
+.installments-page { gap: 15px; padding-bottom: 84px; }
+.installments-page > .receivables-back-header { margin-bottom: 0; }
+.installments-hero { align-items: center; }
+.installments-hero > div > small { display: block; margin-top: 5px; color: #c5d8d1; font-size: 9px; font-weight: 800; }
+.installments-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }
+.installments-summary > div { min-width: 0; padding: 9px 8px; display: flex; align-items: center; justify-content: space-between; gap: 5px; border: 1px solid #dce8e2; border-radius: 13px; background: #fff; box-shadow: 0 4px 11px rgba(17,47,39,.04); }
+.installments-summary span { overflow: hidden; color: #65756e; font-size: 8px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.installments-summary strong { font-size: 13px; font-weight: 950; }
+.installments-summary .paid strong { color: #14704f; }
+.installments-summary .pending strong { color: #9a6912; }
+.installments-summary .overdue strong { color: #b52b2b; }
+.installment-history-list { min-width: 0; display: grid; gap: 7px; }
+.installment-history-card { overflow: visible; }
+.installment-history-card.paid { border-color: #d9e8e0; background: linear-gradient(135deg,#fff,#f9fcfa); }
+.installment-history-card .receivable-main h4 { overflow: visible; font-size: 12px; text-overflow: clip; }
+.installment-history-value { min-width: 78px; }
+.installment-history-value span.pending { color: #835c13; background: #fff0cf; }
+.installment-history-value span.overdue { color: #a52222; background: #ffe4e1; }
+.installment-history-value span.paid { color: #28634e; background: #e2f5df; }
+.installment-history-actions { grid-column: 1 / -1; grid-row: 2; }
+.installment-history-options { z-index: 26; }
+.installment-history-options > div { z-index: 30; min-width: 132px; }
+.installment-history-list > .installment-history-card:last-child .installment-history-options > div { top: auto; bottom: 34px; }
+.installment-delete-impact { margin-bottom: 18px !important; display: grid; gap: 12px; color: var(--muted); font-size: 12px !important; line-height: 1.4 !important; text-align: left; }
+.installment-delete-impact > span { display: block; }
+.installment-delete-impact dl { margin: 0; padding: 10px 11px; display: grid; gap: 6px; border: 1px solid #eadfd0; border-radius: 13px; background: #fffaf2; }
+.installment-delete-impact dl div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.installment-delete-impact dt { color: #7b6b58; font-size: 10px; }
+.installment-delete-impact dd { margin: 0; color: #4d3520; font-size: 10px; font-weight: 900; text-align: right; }
+
+@media (max-width: 380px) {
+  .installments-page .receivables-back-header strong { font-size: 19px; }
+  .installments-hero { padding: 15px 13px; }
+  .installments-hero h2 { font-size: 14px; }
+  .installments-summary > div { padding: 8px 6px; }
+  .installments-summary span { font-size: 7px; }
+  .installment-history-card { padding: 10px; gap: 7px 8px; }
+  .installment-history-value { min-width: 70px; }
+  .installment-history-value strong { font-size: 12px; }
+  .installment-history-actions .receive-compact-action { padding-inline: 8px; }
+}
 .received-income-section > header { background: radial-gradient(circle at 12% 20%,rgba(212,243,107,.2),transparent 30%),linear-gradient(135deg,#124536,#062b21); }
 .received-income-card { border-color: #dce9e3; background: #fff; }
 .received-income-card .receivable-value span { color: #245f49; background: #e2f5df; }

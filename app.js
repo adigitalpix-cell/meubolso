@@ -644,7 +644,7 @@ function fromSupabaseRows(rows) {
     id: row.id,
     source: row.origem === "card-installment" ? "card-installment" : undefined,
     sourcePurchaseId: row.compra_cartao_id || undefined,
-    sourceInstallment: row.parcela_id || undefined,
+    sourceInstallmentId: row.parcela_id || undefined,
     name: row.nome,
     amount: Number(row.valor || 0),
     type: "expense",
@@ -793,7 +793,7 @@ function toSupabaseRows(data) {
           hora_pagamento: item.paidTime || null,
           origem: item.source || "manual",
           compra_cartao_id: item.sourcePurchaseId || null,
-          parcela_id: null
+          parcela_id: item.sourceInstallmentId || null
         });
       }
     });
@@ -924,7 +924,7 @@ function transactionToSupabaseRow(item, userId = session) {
     hora_pagamento: item.paidTime || null,
     origem: item.source || "manual",
     compra_cartao_id: item.sourcePurchaseId || null,
-    parcela_id: null
+    parcela_id: item.sourceInstallmentId || null
   };
 }
 
@@ -3335,13 +3335,68 @@ function purchaseEditorTemplate() {
 
 function installmentsTemplate() {
   const purchase = userCardPurchases().find(item => item.id === selectedPurchaseId);
-  if (!purchase) return `<div class="page-title"><span class="eyebrow">Parcelas</span><h1>Compra não encontrada</h1></div><button class="primary-button" data-view="cardPurchases">Voltar</button>`;
-  const card = userCards().find(item => item.id === purchase.cardId);
-  const rows = Array.from({ length: purchase.installments }, (_, index) => installmentRow(purchase, index + 1)).join("");
+  if (!purchase) return `<section class="dashboard-detail-page receivables-page installments-page"><button class="receivables-back-header" data-view="cardPurchases" aria-label="Voltar para compras"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg><span><strong>Histórico de Parcelas</strong><small>Compra não encontrada.</small></span></button></section>`;
+  const installments = Array.from({ length: purchase.installments }, (_, index) => installmentHistoryItem(purchase, index + 1));
+  const paidCount = installments.filter(item => item.paid).length;
+  const overdueCount = installments.filter(item => item.overdue).length;
+  const pendingCount = installments.length - paidCount - overdueCount;
   return `
-    <div class="page-title"><span class="eyebrow">Histórico de parcelas</span><h1>${escapeHtml(purchase.name)}</h1><p>${escapeHtml(card?.name || "Cartão")} · ${purchase.installments}x de ${money(purchase.amount / purchase.installments)}</p></div>
-    <div class="purchase-list">${rows}</div>
-    <button class="secondary-button" data-view="cardPurchases">Voltar para compras</button>`;
+    <section class="dashboard-detail-page receivables-page installments-page">
+      <button class="receivables-back-header" data-view="cardPurchases" aria-label="Voltar para compras">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Histórico de Parcelas</strong><small>Acompanhe as parcelas desta compra.</small></span>
+      </button>
+      <article class="card-purchases-hero installments-hero">
+        <div><span>Histórico de parcelas</span><h2>${escapeHtml(purchase.name)}</h2><small>${purchase.installments} ${purchase.installments === 1 ? "parcela" : "parcelas"}</small></div>
+        <div class="card-purchases-total"><small>Total da compra</small><strong>${money(purchase.amount)}</strong></div>
+      </article>
+      <div class="installments-summary" aria-label="Resumo das parcelas">
+        <div class="paid"><span>Pagas</span><strong>${paidCount}</strong></div>
+        <div class="pending"><span>Pendentes</span><strong>${pendingCount}</strong></div>
+        <div class="overdue"><span>Atrasadas</span><strong>${overdueCount}</strong></div>
+      </div>
+      <section class="card-purchase-section installments-section">
+        <header><h3>Parcelas</h3><span>${purchase.installments}</span></header>
+        <div class="installment-history-list">${installments.map(installmentHistoryCard).join("")}</div>
+      </section>
+    </section>`;
+}
+
+function installmentHistoryItem(purchase, installmentNumber) {
+  const dueDate = installmentDueDate(purchase, installmentNumber);
+  const key = `${monthKey(dueDate)}-${installmentNumber}`;
+  const paid = (purchase.paidInstallments || []).includes(key);
+  return {
+    purchase,
+    number: installmentNumber,
+    total: purchase.installments,
+    id: purchase.installmentIds?.[installmentNumber] || "",
+    dueDate,
+    key,
+    value: purchase.amount / purchase.installments,
+    paid,
+    overdue: !paid && dueDate < dateOffset()
+  };
+}
+
+function installmentHistoryCard(item) {
+  const status = item.paid ? "Pago" : item.overdue ? "Atrasado" : "Pendente";
+  const statusClass = item.paid ? "paid" : item.overdue ? "overdue" : "pending";
+  const canEditDate = canEditTestInstallmentDates() && !item.paid && item.id;
+  const menu = item.id ? `
+    <details class="receivable-options installment-history-options">
+      <summary aria-label="Mais opções da parcela ${item.number}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary>
+      <div>${canEditDate ? `<button type="button" data-edit-installment-date="${escapeAttribute(item.purchase.id)}" data-installment-number="${item.number}" data-installment-id="${escapeAttribute(item.id)}">Editar data</button>` : ""}<button type="button" class="danger" data-delete-installment="${escapeAttribute(item.purchase.id)}" data-installment-number="${item.number}" data-installment-id="${escapeAttribute(item.id)}">Excluir parcela</button></div>
+    </details>` : "";
+  return `
+    <article class="receivable-card installment-history-card ${statusClass}">
+      <div class="receivable-main"><h4>${formatDate(item.dueDate, true)}</h4><small>Parcela ${item.number}/${item.total}</small></div>
+      <div class="receivable-value installment-history-value"><strong>${money(item.value)}</strong><span class="${statusClass}">${status}</span></div>
+      <div class="receivable-actions installment-history-actions">
+        ${item.paid ? "" : `<button type="button" class="receive-compact-action" data-pay-card-purchase-installment="${escapeAttribute(item.purchase.id)}" data-installment-key="${escapeAttribute(item.key)}" data-installment-due-date="${escapeAttribute(item.dueDate)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>Pagar parcela</span></button>`}
+        ${menu}
+      </div>
+    </article>`;
 }
 
 function cardFormTemplate() {
@@ -3424,24 +3479,6 @@ function purchaseInstallmentCard(item, card) {
       </div>
       </div>
       ${item.paid && paymentDate ? `<b class="card-purchase-paid-date">Pago em ${formatDate(paymentDate, true)}</b>` : ""}
-    </article>`;
-}
-
-function installmentRow(purchase, installmentNumber) {
-  const dueDate = installmentDueDate(purchase, installmentNumber);
-  const key = `${monthKey(dueDate)}-${installmentNumber}`;
-  const paid = (purchase.paidInstallments || []).includes(key);
-  const payment = purchase.installmentPayments?.[key];
-  const overdue = !paid && dueDate < dateOffset();
-  const status = paid ? "Pago" : overdue ? "Atrasado" : "Pendente";
-  const installmentId = purchase.installmentIds?.[installmentNumber] || "";
-  const canEditDate = canEditTestInstallmentDates() && !paid && installmentId;
-  return `
-    <article class="purchase-row ${paid ? "paid" : overdue ? "overdue" : ""}">
-      <div><strong>${formatDate(dueDate, true)} - ${status}</strong><span>Parcela ${installmentNumber}/${purchase.installments}</span></div>
-      <b>${money(purchase.amount / purchase.installments)}</b>
-      ${payment ? `<small>${escapeHtml(payment.paymentMethod)} · ${escapeHtml(payment.account)} · ${formatDate(payment.paidDate, true)} · ${escapeHtml(payment.paidTime)}</small>` : ""}
-      ${!paid ? `<div class="installment-row-actions"><button type="button" data-pay-installment="${purchase.id}" data-installment-key="${key}">Marcar como paga</button>${canEditDate ? `<button type="button" class="edit-installment-date-button" data-edit-installment-date="${escapeAttribute(purchase.id)}" data-installment-number="${installmentNumber}" data-installment-id="${escapeAttribute(installmentId)}">Editar data</button>` : ""}</div>` : ""}
     </article>`;
 }
 
@@ -4198,7 +4235,10 @@ function bindAppEvents() {
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
-  document.querySelectorAll("[data-pay-card-purchase-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payCardPurchaseInstallment, button.dataset.installmentKey, { requestMethod: true })));
+  document.querySelectorAll("[data-pay-card-purchase-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payCardPurchaseInstallment, button.dataset.installmentKey, {
+    requestMethod: true,
+    dueDate: button.dataset.installmentDueDate || ""
+  })));
   document.querySelectorAll("[data-edit-installment-date]").forEach(button => button.addEventListener("click", () => openInstallmentDateDialog(
     button.dataset.editInstallmentDate,
     Number(button.dataset.installmentNumber),
@@ -4232,8 +4272,14 @@ function bindAppEvents() {
     render();
   }));
   document.querySelectorAll("[data-delete-purchase]").forEach(button => button.addEventListener("click", () => deletePurchase(button.dataset.deletePurchase)));
+  document.querySelectorAll("[data-delete-installment]").forEach(button => button.addEventListener("click", () => deletePurchaseInstallment(
+    button.dataset.deleteInstallment,
+    Number(button.dataset.installmentNumber),
+    button.dataset.installmentId
+  )));
   document.querySelectorAll("[data-view-installments]").forEach(button => button.addEventListener("click", () => {
     selectedPurchaseId = button.dataset.viewInstallments;
+    selectedCardId = userCardPurchases().find(purchase => purchase.id === selectedPurchaseId)?.cardId || selectedCardId;
     currentView = "installments";
     render();
   }));
@@ -5583,14 +5629,20 @@ function syncPaidInstallmentTransactions(purchase) {
   db.transactions[session] ||= [];
   purchase.paidInstallments ||= [];
   purchase.paidInstallments.forEach(key => {
-    if (db.transactions[session].some(item => item.sourcePurchaseId === purchase.id && item.sourceInstallment === key)) return;
     const installmentNumber = Number(key.split("-").pop());
+    const installmentId = purchase.installmentIds?.[installmentNumber] || "";
+    const existing = db.transactions[session].find(item => item.sourcePurchaseId === purchase.id && item.sourceInstallment === key);
+    if (existing) {
+      existing.sourceInstallmentId = installmentId || existing.sourceInstallmentId;
+      return;
+    }
     const payment = purchase.installmentPayments?.[key] || {};
     db.transactions[session].unshift({
       id: crypto.randomUUID(),
       source: "card-installment",
       sourcePurchaseId: purchase.id,
       sourceInstallment: key,
+      sourceInstallmentId: installmentId || undefined,
       name: `${purchase.name} (${installmentNumber}/${purchase.installments})`,
       amount: purchase.amount / purchase.installments,
       type: "expense",
@@ -5659,6 +5711,214 @@ async function deletePurchaseCascade(purchaseId) {
   await deleteRowById("compras_cartao", purchaseId);
 }
 
+function installmentDeletionImpact(purchase, installmentNumber) {
+  const currentCount = Number(purchase.installments || 1);
+  const installmentValue = Number(purchase.amount || 0) / currentCount;
+  const nextCount = Math.max(currentCount - 1, 0);
+  const nextTotal = Number((installmentValue * nextCount).toFixed(2));
+  return { installmentNumber, installmentValue, currentCount, nextCount, currentTotal: Number(purchase.amount || 0), nextTotal };
+}
+
+function confirmInstallmentDeletion(purchase, installmentNumber) {
+  const impact = installmentDeletionImpact(purchase, installmentNumber);
+  const dialog = document.querySelector("#confirm-dialog");
+  const title = dialog.querySelector("h2");
+  const message = dialog.querySelector("p");
+  const yesButton = dialog.querySelector("[data-confirm-yes]");
+  const noButton = dialog.querySelector("[data-confirm-no]");
+  const previous = {
+    title: title.textContent,
+    message: message.innerHTML,
+    messageClass: message.className,
+    yes: yesButton.textContent,
+    no: noButton.textContent
+  };
+  title.textContent = "Excluir parcela";
+  message.className = "installment-delete-impact";
+  message.innerHTML = `
+    <span>A exclusão desta parcela ajustará a quantidade de parcelas, o valor total da compra, a fatura, o limite utilizado e as notificações relacionadas.</span>
+    <dl>
+      <div><dt>Parcela</dt><dd>${impact.installmentNumber}/${impact.currentCount}</dd></div>
+      <div><dt>Valor removido</dt><dd>${money(impact.installmentValue)}</dd></div>
+      <div><dt>Quantidade atual</dt><dd>${impact.currentCount}</dd></div>
+      <div><dt>Nova quantidade</dt><dd>${impact.nextCount}</dd></div>
+      <div><dt>Total atual</dt><dd>${money(impact.currentTotal)}</dd></div>
+      <div><dt>Novo total</dt><dd>${money(impact.nextTotal)}</dd></div>
+    </dl>`;
+  yesButton.textContent = "Excluir parcela";
+  noButton.textContent = "Cancelar";
+  return confirmAction().finally(() => {
+    title.textContent = previous.title;
+    message.innerHTML = previous.message;
+    message.className = previous.messageClass;
+    yesButton.textContent = previous.yes;
+    noButton.textContent = previous.no;
+  });
+}
+
+function purchaseAfterInstallmentDeletion(purchase, deletedNumber) {
+  const impact = installmentDeletionImpact(purchase, deletedNumber);
+  const deletedDueDate = installmentDueDate(purchase, deletedNumber);
+  const deletedKey = `${monthKey(deletedDueDate)}-${deletedNumber}`;
+  const installmentIds = {};
+  const installmentDueDates = {};
+  const paidInstallments = [];
+  const installmentPayments = {};
+  const keyMap = new Map();
+  const installmentIdMap = new Map();
+  for (let oldNumber = 1; oldNumber <= impact.currentCount; oldNumber += 1) {
+    if (oldNumber === deletedNumber) continue;
+    const newNumber = oldNumber < deletedNumber ? oldNumber : oldNumber - 1;
+    const dueDate = installmentDueDate(purchase, oldNumber);
+    const oldKey = `${monthKey(dueDate)}-${oldNumber}`;
+    const newKey = `${monthKey(dueDate)}-${newNumber}`;
+    const realId = purchase.installmentIds?.[oldNumber] || "";
+    installmentIds[newNumber] = realId;
+    installmentDueDates[newNumber] = dueDate;
+    keyMap.set(oldKey, newKey);
+    if (realId) installmentIdMap.set(realId, { key: newKey, number: newNumber, dueDate });
+    if ((purchase.paidInstallments || []).includes(oldKey)) {
+      paidInstallments.push(newKey);
+      if (purchase.installmentPayments?.[oldKey]) installmentPayments[newKey] = { ...purchase.installmentPayments[oldKey] };
+    }
+  }
+  return {
+    impact,
+    deletedKey,
+    keyMap,
+    installmentIdMap,
+    purchase: {
+      ...purchase,
+      amount: impact.nextTotal,
+      installments: impact.nextCount,
+      paidInstallments,
+      installmentPayments,
+      installmentIds,
+      installmentDueDates
+    }
+  };
+}
+
+async function persistPurchaseAfterInstallmentDeletion(purchase, deletedInstallmentId) {
+  const deleteQuery = supabaseAnd(
+    supabaseEq("id", deletedInstallmentId),
+    supabaseEq("usuario_id", session),
+    supabaseEq("compra_cartao_id", purchase.id)
+  );
+  const deleted = await supabaseRequest("parcelas", {
+    method: "DELETE",
+    query: deleteQuery,
+    prefer: "return=representation"
+  });
+  if (deleted.length !== 1 || deleted[0].id !== deletedInstallmentId) throw new Error("INSTALLMENT_DELETE_NOT_CONFIRMED");
+  const rows = purchaseInstallmentRows(purchase).sort((a, b) => a.numero - b.numero);
+  for (const row of rows) {
+    const query = supabaseAnd(
+      supabaseEq("id", row.id),
+      supabaseEq("usuario_id", session),
+      supabaseEq("compra_cartao_id", purchase.id)
+    );
+    const updated = await supabaseRequest("parcelas", {
+      method: "PATCH",
+      query,
+      body: {
+        numero: row.numero,
+        valor: row.valor,
+        data_vencimento: row.data_vencimento,
+        status: row.status,
+        data_pagamento: row.data_pagamento,
+        hora_pagamento: row.hora_pagamento,
+        forma_pagamento: row.forma_pagamento,
+        tipo_conta: row.tipo_conta
+      },
+      prefer: "return=representation"
+    });
+    if (updated.length !== 1 || updated[0].id !== row.id || Number(updated[0].numero) !== row.numero) {
+      throw new Error("INSTALLMENT_RENUMBER_NOT_CONFIRMED");
+    }
+  }
+  await upsertRows("compras_cartao", [purchaseToSupabaseRow(purchase)]);
+}
+
+async function deletePurchaseInstallment(purchaseId, installmentNumber, installmentId) {
+  if (isMaster()) return;
+  const purchase = userCardPurchases().find(item => item.id === purchaseId);
+  const realInstallmentId = purchase?.installmentIds?.[installmentNumber] || "";
+  if (!purchase || !installmentId || realInstallmentId !== installmentId) return showToast("Parcela não encontrada.");
+  if (!navigator.onLine) return showToast("Conecte-se à internet para excluir a parcela no Supabase.");
+  if (!await confirmInstallmentDeletion(purchase, installmentNumber)) return;
+  const cardId = purchase.cardId;
+  const result = purchaseAfterInstallmentDeletion(purchase, installmentNumber);
+  const currentTransactions = db.transactions[session] || [];
+  const deletedTransactions = currentTransactions.filter(item =>
+    item.sourcePurchaseId === purchase.id && (item.sourceInstallmentId === installmentId || item.sourceInstallment === result.deletedKey)
+  );
+  if (result.impact.nextCount === 0) {
+    try {
+      await deletePurchaseCascade(purchase.id);
+      db.cardPurchases[session] = userCardPurchases().filter(item => item.id !== purchase.id);
+      db.transactions[session] = currentTransactions.filter(item => item.sourcePurchaseId !== purchase.id);
+      cacheDatabase();
+      await refreshUserFinancialData();
+    } catch (error) {
+      console.error("[MEU BOLSO][Supabase] erro ao excluir última parcela", error);
+      return showToast("Não foi possível excluir a parcela no Supabase.");
+    }
+    selectedCardId = cardId;
+    selectedPurchaseId = null;
+    currentView = "cardPurchases";
+    logActivity(`Excluiu a última parcela de ${purchase.name}. Valor removido: ${money(result.impact.installmentValue)}.`);
+    showToast("Parcela excluída e compra encerrada.");
+    render();
+    return;
+  }
+  if (Object.keys(result.purchase.installmentIds || {}).length !== result.impact.nextCount) {
+    return showToast("Não foi possível confirmar os IDs reais das parcelas restantes.");
+  }
+  const updatedTransactions = currentTransactions
+    .filter(item => !deletedTransactions.includes(item))
+    .map(item => {
+      if (item.sourcePurchaseId !== purchase.id) return item;
+      const remapped = item.sourceInstallmentId
+        ? result.installmentIdMap.get(item.sourceInstallmentId)
+        : result.keyMap.has(item.sourceInstallment) ? {
+            key: result.keyMap.get(item.sourceInstallment),
+            number: Number(result.keyMap.get(item.sourceInstallment).split("-").pop()),
+            dueDate: installmentDueDate(result.purchase, Number(result.keyMap.get(item.sourceInstallment).split("-").pop()))
+          } : null;
+      if (!remapped) return item;
+      return {
+        ...item,
+        sourceInstallment: remapped.key,
+        name: `${purchase.name} (${remapped.number}/${result.impact.nextCount})`,
+        amount: result.impact.installmentValue,
+        dueDate: remapped.dueDate
+      };
+    });
+  const changedTransactions = updatedTransactions.filter(item => item.sourcePurchaseId === purchase.id && (item.sourceInstallment || item.sourceInstallmentId));
+  try {
+    await deleteRows("despesas", supabaseAnd(
+      supabaseEq("usuario_id", session),
+      supabaseEq("compra_cartao_id", purchase.id),
+      supabaseEq("parcela_id", installmentId)
+    ));
+    await persistPurchaseAfterInstallmentDeletion(result.purchase, installmentId);
+    await Promise.all(changedTransactions.map(item => saveTransactionToSupabase(item)));
+    db.cardPurchases[session] = userCardPurchases().map(item => item.id === purchase.id ? result.purchase : item);
+    db.transactions[session] = updatedTransactions;
+    cacheDatabase();
+    await refreshUserFinancialData();
+  } catch (error) {
+    console.error("[MEU BOLSO][Supabase] erro ao excluir parcela", error);
+    return showToast("Não foi possível excluir a parcela no Supabase.");
+  }
+  selectedCardId = cardId;
+  selectedPurchaseId = purchase.id;
+  logActivity(`Excluiu a parcela ${installmentNumber}/${result.impact.currentCount} de ${purchase.name}. Valor removido: ${money(result.impact.installmentValue)}.`);
+  showToast("Parcela excluída com sucesso.");
+  render();
+}
+
 async function payCardInstallment(purchaseId, installmentKey = null, options = {}) {
   if (isMaster()) return;
   if (!options.fromNotification && !options.requestMethod && !await confirmAction()) return;
@@ -5677,7 +5937,7 @@ async function payCardInstallment(purchaseId, installmentKey = null, options = {
       type: "expense",
       name: `${purchase.name} · Parcela ${installmentNumber}/${purchase.installments}`,
       amount: Number(purchase.amount || 0) / Number(purchase.installments || 1),
-      dueDate: cardInvoiceDueDate(card || {})
+      dueDate: options.dueDate || cardInvoiceDueDate(card || {})
     }, {
       eyebrow: "Confirmar pagamento da parcela",
       title: "Marcar parcela como paga"
