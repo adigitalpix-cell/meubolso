@@ -23,6 +23,8 @@ const DEFAULT_CATEGORIES = DEFAULT_CATEGORY_DEFINITIONS.map(item => ({ ...item, 
 const PAYMENT_METHODS = ["Dinheiro", "Pix", "Cartão", "Poupança"];
 const DEFAULT_ACCOUNTS = ["Conta corrente", "Dinheiro", "Poupança", "Carteira", "Mercado Pago"];
 const SUPPORT_STATUSES = { pending: "Pendente", progress: "Em Atendimento", resolved: "Resolvido" };
+const BRAZILIAN_STATES = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
+const BRAZILIAN_AREA_CODES = new Set("11 12 13 14 15 16 17 18 19 21 22 24 27 28 31 32 33 34 35 37 38 41 42 43 44 45 46 47 48 49 51 53 54 55 61 62 63 64 65 66 67 68 69 71 73 74 75 77 79 81 82 83 84 85 86 87 88 89 91 92 93 94 95 96 97 98 99".split(" "));
 let deferredInstallPrompt = null;
 let serviceWorkerReloading = false;
 let isOfflineMode = !navigator.onLine;
@@ -141,13 +143,16 @@ function normalizeDatabase(data = structuredClone(seed)) {
   data.supportTickets ||= [];
   data.users.forEach(user => {
     if (user.role === "master") {
-      user.name = "Alex";
-      user.username = "alex";
+      if (!user.name) user.name = "Alex";
+      if (!user.username) user.username = "alex";
       if (!user.password || user.password === "master123") user.password = "sepi25al22Mu";
       if (!user.email) user.email = "alex.cf10@outlook.com";
     }
     if (!user.whatsapp) user.whatsapp = "";
     if (!user.email) user.email = "";
+    if (!user.address) user.address = "";
+    if (!user.city) user.city = "";
+    if (!user.state) user.state = "";
     if (!user.createdAt) user.createdAt = dateOffset();
     if (user.role === "user") {
       if (!user.accessExpiresAt) user.accessExpiresAt = futureDate(365);
@@ -419,6 +424,9 @@ function userToSupabaseLike(user) {
     senha: user.password,
     whatsapp: user.whatsapp || "",
     email: user.email || "",
+    endereco: user.address || "",
+    cidade: user.city || "",
+    estado: user.state || "",
     data_cadastro: user.createdAt,
     data_vencimento: user.accessExpiresAt,
     status: user.blocked ? "bloqueado" : "ativo",
@@ -613,6 +621,9 @@ function fromSupabaseRows(rows) {
       role: row.perfil === "master" ? "master" : "user",
       whatsapp: row.whatsapp || "",
       email: row.email || "",
+      address: row.endereco || "",
+      city: row.cidade || "",
+      state: row.estado || "",
       createdAt: row.data_cadastro,
       accessExpiresAt: row.data_vencimento,
       blocked: row.status === "bloqueado",
@@ -752,6 +763,9 @@ function toSupabaseRows(data) {
     senha: user.password,
     whatsapp: user.whatsapp || "",
     email: user.email || "",
+    endereco: user.address || "",
+    cidade: user.city || "",
+    estado: user.state || "",
     data_cadastro: user.createdAt || dateOffset(),
     data_vencimento: user.role === "user" ? user.accessExpiresAt || futureDate(30) : user.accessExpiresAt || futureDate(365),
     status: user.role === "master" ? "ativo" : user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : daysUntilExpiry(user) <= 7 ? "vencendo" : "ativo",
@@ -884,6 +898,9 @@ async function saveNewUserToSupabase(user) {
     senha: user.password,
     whatsapp: user.whatsapp || "",
     email: user.email || "",
+    endereco: user.address || "",
+    cidade: user.city || "",
+    estado: user.state || "",
     data_cadastro: user.createdAt || dateOffset(),
     data_vencimento: user.accessExpiresAt || futureDate(30),
     status: "ativo",
@@ -3626,28 +3643,72 @@ function categoryManagementRow(item) {
     </article>`;
 }
 
-function securityTemplate() {
+function securityInfoRow(label, value) {
   return `
-    <div class="page-title"><span class="eyebrow">Proteção</span><h1>Segurança</h1><p>Informações de acesso e proteção local.</p></div>
-    <article class="security-card">
-      <h2>Armazenamento temporário</h2>
-      <p>Seus dados principais são sincronizados com o Supabase. O cache local guarda apenas arquivos temporários do aplicativo.</p>
-    </article>
-    <article class="security-card">
-      <h2>Conta atual</h2>
-      <p>Usuário: <b>${escapeHtml(currentUser().username)}</b></p>
-      <p>Perfil: <b>${isMaster() ? "Master" : "Usuário comum"}</b></p>
-    </article>
-    <form class="admin-form" id="password-form">
-      <h2>Alterar senha</h2>
-      <label class="field"><span>Senha atual</span><input name="currentPassword" type="password" required></label>
-      <label class="field"><span>Nova senha</span><input name="newPassword" type="password" minlength="6" required></label>
-      <label class="field"><span>Confirmar nova senha</span><input name="confirmPassword" type="password" minlength="6" required></label>
-      <button class="primary-button">Salvar nova senha</button>
-    </form>
-    <div class="menu-list">
-      <button class="menu-item" data-view="profile"><span>Voltar ao perfil</span><b>›</b></button>
-    </div>`;
+    <article class="security-info-row">
+      <div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "Não informado")}</strong></div>
+    </article>`;
+}
+
+function securityTemplate() {
+  const user = currentUser();
+  return `
+    <section class="security-page">
+      <button class="receivables-back-header" data-view="profile" aria-label="Voltar para o perfil">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+        <span><strong>Segurança</strong><small>Informações de acesso e proteção local.</small></span>
+      </button>
+      <div class="security-info-list">
+        ${securityInfoRow("Nome", user.name)}
+        ${securityInfoRow("E-mail", user.email)}
+        ${securityInfoRow("WhatsApp", formatBrazilianWhatsapp(user.whatsapp) || user.whatsapp)}
+        ${securityInfoRow("Usuário", `@${user.username}`)}
+        ${securityInfoRow("Endereço", user.address)}
+        ${securityInfoRow("Cidade", user.city)}
+        ${securityInfoRow("Estado", user.state)}
+      </div>
+      <div class="security-actions">
+        <button class="primary-button security-action-button security-action-primary" type="button" data-open-security-data><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10.6-10.6a2.1 2.1 0 0 0-3-3L5.2 16zM14.5 6.7l2.8 2.8"/></svg><span>Editar dados</span></button>
+        <button class="secondary-button security-action-button security-action-secondary" type="button" data-open-security-password><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10M12 14v2.5"/></svg><span>Alterar senha</span></button>
+      </div>
+    </section>
+    <dialog id="security-data-dialog" class="sheet card-sheet security-edit-dialog">
+      <form id="security-data-form">
+        <div class="sheet-handle"></div>
+        <header class="sheet-header">
+          <div class="card-header-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.5-4 2.8-6 7-6s6.5 2 7 6"/></svg></div>
+          <div class="card-header-copy"><span class="eyebrow">DADOS DA CONTA</span><h2>Editar informações</h2><p>Atualize seus dados pessoais</p></div>
+          <button class="icon-button" type="button" data-close-security-data aria-label="Fechar">×</button>
+        </header>
+        <div class="security-data-fields">
+          <label class="field"><span>Nome</span><input name="name" type="text" maxlength="80" value="${escapeAttribute(user.name)}" placeholder="Seu nome completo" required></label>
+          <label class="field"><span>E-mail</span><input name="email" type="email" maxlength="120" value="${escapeAttribute(user.email)}" placeholder="usuario@dominio.com" required></label>
+          <label class="field"><span>WhatsApp</span><input name="whatsapp" type="tel" maxlength="15" value="${escapeAttribute(formatBrazilianWhatsapp(user.whatsapp) || user.whatsapp)}" placeholder="(74) 99137-5884" required></label>
+          <label class="field"><span>Usuário</span><input name="username" type="text" maxlength="30" value="${escapeAttribute(user.username)}" placeholder="alexteste" required></label>
+          <label class="field"><span>Endereço</span><input name="address" type="text" maxlength="160" value="${escapeAttribute(user.address)}" placeholder="Rua, número e complemento" required></label>
+          <label class="field"><span>Cidade</span><input name="city" type="text" maxlength="80" value="${escapeAttribute(user.city)}" placeholder="Campo Formoso" required></label>
+          <label class="field"><span>Estado</span><select name="state" required><option value="">Selecione</option>${BRAZILIAN_STATES.map(state => `<option value="${state}" ${user.state === state ? "selected" : ""}>${state}</option>`).join("")}</select></label>
+        </div>
+        <p class="security-access-warning">Alterar e-mail ou usuário pode mudar sua forma de acesso.</p>
+        <div class="security-form-error" data-security-data-error role="alert" aria-live="assertive"></div>
+        <button class="primary-button card-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar alterações</span></button>
+      </form>
+    </dialog>
+    <dialog id="security-password-dialog" class="sheet card-sheet security-edit-dialog">
+      <form id="password-form">
+        <div class="sheet-handle"></div>
+        <header class="sheet-header">
+          <div class="card-header-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2.5"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10M12 14v2.5"/></svg></div>
+          <div class="card-header-copy"><span class="eyebrow">PROTEÇÃO DA CONTA</span><h2>Alterar senha</h2><p>Defina uma nova senha de acesso</p></div>
+          <button class="icon-button" type="button" data-close-security-password aria-label="Fechar">×</button>
+        </header>
+        <label class="field"><span>Senha atual</span><input name="currentPassword" type="password" autocomplete="current-password" required></label>
+        <label class="field"><span>Nova senha</span><input name="newPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+        <label class="field"><span>Confirmar nova senha</span><input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+        <div class="security-form-error" data-security-password-error role="alert" aria-live="assertive"></div>
+        <button class="primary-button card-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar nova senha</span></button>
+      </form>
+    </dialog>`;
 }
 
 function activityLogTemplate() {
@@ -4267,7 +4328,16 @@ function bindAppEvents() {
     });
     if (!purchaseDialog.open) purchaseDialog.showModal();
   }
+  document.querySelector("[data-open-security-data]")?.addEventListener("click", openSecurityDataDialog);
+  document.querySelector("[data-open-security-password]")?.addEventListener("click", openSecurityPasswordDialog);
+  document.querySelector("#security-data-form")?.addEventListener("submit", saveSecurityData);
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
+  document.querySelector("[data-close-security-data]")?.addEventListener("click", closeSecurityDataDialog);
+  document.querySelector("[data-close-security-password]")?.addEventListener("click", closeSecurityPasswordDialog);
+  const securityDataDialog = document.querySelector("#security-data-dialog");
+  if (securityDataDialog) securityDataDialog.oncancel = event => { event.preventDefault(); closeSecurityDataDialog(); };
+  const securityPasswordDialog = document.querySelector("#security-password-dialog");
+  if (securityPasswordDialog) securityPasswordDialog.oncancel = event => { event.preventDefault(); closeSecurityPasswordDialog(); };
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
   document.querySelectorAll("[data-pay-card-purchase-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payCardPurchaseInstallment, button.dataset.installmentKey, {
@@ -6193,18 +6263,138 @@ async function closePurchase(purchaseId) {
   render();
 }
 
+function openSecurityDataDialog() {
+  const dialog = document.querySelector("#security-data-dialog");
+  if (!dialog) return;
+  setSecurityFormError("[data-security-data-error]", "");
+  dialog.showModal();
+  document.querySelector("#security-data-form [name='name']")?.focus();
+}
+
+function closeSecurityDataDialog() {
+  document.querySelector("#security-data-dialog")?.close();
+  document.querySelector("#security-data-form")?.reset();
+  setSecurityFormError("[data-security-data-error]", "");
+}
+
+function openSecurityPasswordDialog() {
+  const dialog = document.querySelector("#security-password-dialog");
+  if (!dialog) return;
+  setSecurityFormError("[data-security-password-error]", "");
+  dialog.showModal();
+  document.querySelector("#password-form [name='currentPassword']")?.focus();
+}
+
+function closeSecurityPasswordDialog() {
+  document.querySelector("#security-password-dialog")?.close();
+  document.querySelector("#password-form")?.reset();
+  setSecurityFormError("[data-security-password-error]", "");
+}
+
+function setSecurityFormError(selector, message) {
+  const target = document.querySelector(selector);
+  if (target) target.textContent = message;
+}
+
+function formatBrazilianWhatsapp(value = "") {
+  const digits = normalizePhone(value);
+  if (digits.length !== 11) return "";
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function isValidBrazilianWhatsapp(value = "") {
+  const digits = normalizePhone(value);
+  return digits.length === 11 && BRAZILIAN_AREA_CODES.has(digits.slice(0, 2)) && /^9\d{8}$/.test(digits.slice(2));
+}
+
+async function securityDataHasConflict(property, column, value, userId) {
+  const normalized = property === "whatsapp" ? normalizePhone(value) : value.toLocaleLowerCase("pt-BR");
+  const localConflict = db.users.some(user => {
+    if (user.id === userId) return false;
+    const current = property === "whatsapp" ? normalizePhone(user[property]) : String(user[property] || "").toLocaleLowerCase("pt-BR");
+    return current === normalized;
+  });
+  if (localConflict) return true;
+  const rows = await supabaseSelect("usuarios", `select=id&${column}=eq.${encodeURIComponent(value)}&id=neq.${encodeURIComponent(userId)}&limit=1`);
+  return rows.length > 0;
+}
+
+async function saveSecurityData(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const user = currentUser();
+  if (!user) return;
+  const values = {
+    name: String(data.get("name") || "").trim(),
+    email: String(data.get("email") || "").trim().toLocaleLowerCase("pt-BR"),
+    whatsapp: String(data.get("whatsapp") || "").trim(),
+    username: String(data.get("username") || "").trim().replace(/^@+/, "").toLocaleLowerCase("pt-BR"),
+    address: String(data.get("address") || "").trim(),
+    city: String(data.get("city") || "").trim(),
+    state: String(data.get("state") || "").trim().toUpperCase()
+  };
+  if (values.name.length < 2) return setSecurityFormError("[data-security-data-error]", "Informe o nome corretamente.");
+  if (!isValidEmail(values.email)) return setSecurityFormError("[data-security-data-error]", "Informe um e-mail válido, como usuario@dominio.com.");
+  if (!isValidBrazilianWhatsapp(values.whatsapp)) return setSecurityFormError("[data-security-data-error]", "Informe um WhatsApp brasileiro completo, como (74) 99137-5884.");
+  values.whatsapp = formatBrazilianWhatsapp(values.whatsapp);
+  if (!/^[a-z0-9._-]{3,30}$/i.test(values.username)) return setSecurityFormError("[data-security-data-error]", "Use de 3 a 30 caracteres no usuário: letras, números, ponto, hífen ou sublinhado.");
+  if (values.address.length < 2) return setSecurityFormError("[data-security-data-error]", "Informe o endereço corretamente.");
+  if (values.city.length < 2) return setSecurityFormError("[data-security-data-error]", "Informe a cidade corretamente.");
+  if (!BRAZILIAN_STATES.includes(values.state)) return setSecurityFormError("[data-security-data-error]", "Selecione um estado válido.");
+  setSecurityFormError("[data-security-data-error]", "");
+  try {
+    const uniqueFields = [
+      { property: "email", column: "email", label: "E-mail" },
+      { property: "whatsapp", column: "whatsapp", label: "WhatsApp" },
+      { property: "username", column: "usuario", label: "Usuário" }
+    ];
+    for (const field of uniqueFields) {
+      const previous = field.property === "whatsapp" ? normalizePhone(user[field.property]) : String(user[field.property] || "").toLocaleLowerCase("pt-BR");
+      const current = field.property === "whatsapp" ? normalizePhone(values[field.property]) : values[field.property];
+      if (previous !== current && await securityDataHasConflict(field.property, field.column, values[field.property], user.id)) {
+        return setSecurityFormError("[data-security-data-error]", `${field.label} já está em uso.`);
+      }
+    }
+    const updatedUser = { ...user, ...values };
+    await upsertRows("usuarios", [userToSupabaseLike(updatedUser)]);
+    Object.assign(user, updatedUser);
+    saveSession(user);
+    cacheDatabase();
+    closeSecurityDataDialog();
+    render();
+    showToast("Dados atualizados com sucesso.");
+  } catch (error) {
+    console.error("[MEU BOLSO][Segurança] erro ao atualizar dados", error);
+    setSecurityFormError("[data-security-data-error]", "Não foi possível salvar no Supabase. Tente novamente.");
+  }
+}
+
 async function changePassword(event) {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const data = new FormData(form);
   const user = currentUser();
-  if (data.get("currentPassword") !== user.password || data.get("newPassword") !== data.get("confirmPassword")) {
-    return showToast("Não foi possível concluir a operação.");
+  const currentPassword = String(data.get("currentPassword") || "");
+  const newPassword = String(data.get("newPassword") || "");
+  const confirmation = String(data.get("confirmPassword") || "");
+  if (currentPassword !== user.password) return setSecurityFormError("[data-security-password-error]", "A senha atual está incorreta.");
+  if (newPassword.length < 6) return setSecurityFormError("[data-security-password-error]", "A nova senha deve ter pelo menos 6 caracteres.");
+  if (newPassword === currentPassword) return setSecurityFormError("[data-security-password-error]", "A nova senha deve ser diferente da senha atual.");
+  if (newPassword !== confirmation) return setSecurityFormError("[data-security-password-error]", "A confirmação da nova senha não confere.");
+  setSecurityFormError("[data-security-password-error]", "");
+  try {
+    const updatedUser = { ...user, password: newPassword };
+    await upsertRows("usuarios", [userToSupabaseLike(updatedUser)]);
+    user.password = newPassword;
+    cacheDatabase();
+    closeSecurityPasswordDialog();
+    render();
+    showToast("Senha alterada com sucesso.");
+  } catch (error) {
+    console.error("[MEU BOLSO][Segurança] erro ao alterar senha", error);
+    setSecurityFormError("[data-security-password-error]", "Não foi possível salvar a nova senha no Supabase.");
   }
-  if (!await confirmAction()) return;
-  user.password = data.get("newPassword");
-  saveDatabase();
-  event.currentTarget.reset();
-  showToast("Operação realizada com sucesso.");
 }
 
 function parseMoney(value) {
