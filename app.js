@@ -1682,8 +1682,10 @@ function profileFinancialDashboardTemplate() {
   const cardUsed = pendingPurchaseTotal();
   const cardUsage = cardLimit ? Math.min(cardUsed / cardLimit * 100, 100) : 0;
   return `
-    <div class="page-title"><span class="eyebrow">Análise financeira</span><h1>Dashboard Financeiro</h1><p>Acompanhe a situação do mês, cartões e categorias.</p></div>
-    <button class="secondary-button back-button" data-view="profile">Voltar ao perfil</button>
+    <button class="receivables-back-header" data-view="profile" aria-label="Voltar para o perfil">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+      <span><b class="eyebrow">Análise financeira</b><strong>Dashboard Financeiro</strong><small>Acompanhe a situação do mês, cartões e categorias.</small></span>
+    </button>
     ${monthSituationTemplate(dashboard, monthNet)}
     ${cardsOverviewTemplate(cardLimit, cardUsed, dashboard.availableLimit, cardUsage)}
     ${categoryOverviewTemplate()}`;
