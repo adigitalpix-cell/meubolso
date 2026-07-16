@@ -1258,6 +1258,158 @@ button { cursor: pointer; }
 
 body:has(#transaction-dialog[open]) { overflow: hidden; }
 
+/* Novo cartão · refinamento visual MB C2 */
+.card-sheet {
+  position: relative;
+  max-height: 96dvh;
+  border-radius: 30px 30px 0 0;
+  background: #fbfdfb;
+  box-shadow: 0 -18px 70px rgba(3, 34, 25, .24);
+}
+.card-sheet form { position: relative; padding: 0 18px 24px; }
+.card-sheet .sheet-handle {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 50%;
+  width: 54px;
+  height: 5px;
+  margin: 0;
+  transform: translateX(-50%);
+  background: rgba(210, 255, 221, .35);
+}
+.card-sheet .sheet-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -18px 20px;
+  padding: 43px 18px 30px;
+  overflow: hidden;
+  color: #f7fff8;
+  background:
+    radial-gradient(circle at 14% 42%, rgba(80, 239, 127, .26), transparent 28%),
+    radial-gradient(circle at 88% 0, rgba(68, 187, 119, .17), transparent 38%),
+    linear-gradient(140deg, #064733 0%, #032f24 55%, #021f19 100%);
+}
+.card-header-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgba(194, 255, 151, .65);
+  border-radius: 50%;
+  color: #d9ff74;
+  background: rgba(4, 65, 45, .64);
+  box-shadow: 0 0 0 5px rgba(119, 247, 137, .055), 0 0 24px rgba(89, 245, 119, .25), inset 0 0 20px rgba(108, 239, 135, .08);
+}
+.card-header-icon svg {
+  width: 31px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.card-sheet .card-header-copy { min-width: 0; }
+.card-sheet .sheet-header .eyebrow { color: #c8ff6e; letter-spacing: .12em; }
+.card-sheet .sheet-header h2 { margin: 5px 0 4px; color: #fff; font-size: clamp(1.08rem, 5.3vw, 1.32rem); letter-spacing: -.035em; white-space: nowrap; }
+.card-sheet .sheet-header p { margin: 0; color: #d2e5dc; font-size: .76rem; }
+.card-sheet .sheet-header .icon-button {
+  align-self: start;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(216, 255, 226, .1);
+  color: #fff;
+  background: rgba(224, 255, 232, .11);
+  backdrop-filter: blur(8px);
+  outline: 0;
+}
+.card-sheet .sheet-header .icon-button:focus-visible { box-shadow: 0 0 0 2px #cfff77; }
+.card-sheet .field { gap: 8px; margin-bottom: 16px; }
+.card-sheet .field > span,
+.card-sheet .field-title { color: #33443d; font-size: .78rem; font-weight: 760; }
+.card-sheet .field input,
+.card-sheet .field select,
+.card-sheet .money-input {
+  min-height: 55px;
+  border-color: #d9e3de;
+  border-radius: 15px;
+  color: #14251e;
+  background-color: #fff;
+  box-shadow: 0 4px 12px rgba(16, 51, 40, .025);
+}
+.card-sheet .field input:focus,
+.card-sheet .field select:focus,
+.card-sheet .money-input:focus-within {
+  border-color: #42b86f;
+  box-shadow: 0 0 0 3px rgba(72, 205, 109, .12), 0 8px 18px rgba(9, 78, 54, .06);
+}
+.card-sheet .card-name-field input { padding-inline: 17px; }
+.card-sheet .card-limit-field {
+  position: relative;
+  margin-bottom: 18px;
+  padding: 16px 17px 14px;
+  border: 1px solid rgba(78, 193, 113, .12);
+  border-radius: 19px;
+  background: linear-gradient(135deg, #effaf1, #f7fcf7 58%, #eaf6ec);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+.card-sheet .card-limit-field > span { color: #173a2e; font-size: .76rem; font-weight: 850; }
+.card-sheet .card-limit-field .money-input {
+  min-height: 58px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.card-sheet .card-limit-field .money-input b { color: #075f41; font-size: 1.32rem; }
+.card-sheet .card-limit-field .money-input input {
+  min-width: 0;
+  min-height: 54px;
+  color: #076143;
+  font-size: 2.25rem;
+  font-weight: 850;
+  letter-spacing: -.045em;
+}
+.card-sheet .card-limit-field .money-input input::placeholder { color: #076143; opacity: 1; }
+.card-sheet .card-day-grid { gap: 0 11px; }
+.card-sheet .card-day-grid .field { min-width: 0; }
+.card-sheet .card-day-grid input { width: 100%; }
+.card-sheet .card-save-button {
+  min-height: 58px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid rgba(192, 255, 93, .75);
+  border-radius: 17px;
+  color: #fff;
+  background: linear-gradient(135deg, #08704d, #023b2c 72%, #032c22);
+  box-shadow: 0 9px 24px rgba(5, 89, 60, .25), 0 0 15px rgba(117, 238, 88, .22), inset 0 1px 0 rgba(230, 255, 205, .2);
+  font-size: .9rem;
+}
+.card-sheet .card-save-button:hover { background: linear-gradient(135deg, #087a53, #034431 72%, #033326); }
+.card-sheet .card-save-button svg { width: 23px; fill: none; stroke: #d8ff72; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (max-width: 380px) {
+  .card-sheet .sheet-header { gap: 9px; padding: 40px 13px 28px; }
+  .card-header-icon { width: 52px; height: 52px; }
+  .card-header-icon svg { width: 27px; }
+  .card-sheet .sheet-header h2 { font-size: 1.2rem; }
+  .card-sheet .sheet-header p { font-size: .68rem; }
+  .card-sheet .sheet-header .icon-button { width: 38px; height: 38px; }
+  .card-sheet .field input,
+  .card-sheet .field select,
+  .card-sheet .money-input { padding-inline: 10px; font-size: .78rem; }
+  .card-sheet .card-limit-field { padding-inline: 14px; }
+  .card-sheet .card-limit-field .money-input { padding: 0; }
+  .card-sheet .card-limit-field .money-input input { font-size: 1.95rem; }
+}
+
+body:has(#card-dialog[open]) { overflow: hidden; }
+
 /* Categorias · refinamento visual MB C2 */
 .categories-hero {
   grid-template-columns: auto minmax(0, 1fr) auto;

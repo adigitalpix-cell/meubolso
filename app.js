@@ -3404,14 +3404,14 @@ function cardFormTemplate() {
   return `
     <div class="card-modal-fields">
       <input type="hidden" name="id" value="${editing?.id || ""}">
-      <label class="field"><span>Nome do cartão</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Nubank"></label>
-      <label class="field"><span>Bandeira</span><select name="brand">${["Visa","Mastercard","Elo","American Express","Outro"].map(brand => `<option ${editing?.brand === brand ? "selected" : ""}>${brand}</option>`).join("")}</select></label>
-      <label class="field"><span>Limite</span><div class="money-input"><b>R$</b><input name="limit" required inputmode="decimal" value="${editing ? String(editing.limit).replace(".", ",") : ""}" placeholder="0,00"></div></label>
-      <div class="form-grid">
+      <label class="field card-name-field"><span>Nome do cartão</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Nubank"></label>
+      <label class="field card-brand-field"><span>Bandeira</span><select name="brand">${["Visa","Mastercard","Elo","American Express","Outro"].map(brand => `<option ${editing?.brand === brand ? "selected" : ""}>${brand}</option>`).join("")}</select></label>
+      <label class="field card-limit-field"><span>Limite do cartão</span><div class="money-input"><b>R$</b><input name="limit" required inputmode="decimal" value="${editing ? String(editing.limit).replace(".", ",") : ""}" placeholder="0,00"></div></label>
+      <div class="form-grid card-day-grid">
         <label class="field"><span>Fechamento</span><input name="closingDay" required type="number" min="1" max="31" value="${editing?.closingDay || ""}" placeholder="20"></label>
         <label class="field"><span>Vencimento</span><input name="dueDay" required type="number" min="1" max="31" value="${editing?.dueDay || ""}" placeholder="10"></label>
       </div>
-      <button class="primary-button card-save-button" type="submit">Salvar cartão</button>
+      <button class="primary-button card-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar cartão</span></button>
     </div>`;
 }
 
@@ -4973,10 +4973,17 @@ function openTransactionDialog(type = "expense") {
 function openCardDialog(cardId = null, mode = "edit") {
   editingCardId = cardId;
   const dialog = document.querySelector("#card-dialog");
+  const eyebrow = document.querySelector("#card-form-eyebrow");
   const title = document.querySelector("#card-form-title");
+  const subtitle = document.querySelector("#card-form-subtitle");
   const body = document.querySelector("#card-form-body");
-  if (!dialog || !title || !body) return;
-  title.textContent = cardId ? (mode === "limit" ? "Ajustar limite" : "Editar cartão") : "Novo cartão";
+  if (!dialog || !eyebrow || !title || !subtitle || !body) return;
+  const header = cardId
+    ? mode === "limit"
+      ? ["LIMITE DO CARTÃO", "Ajustar limite", "Atualize o limite disponível do cartão"]
+      : ["EDITAR CARTÃO", "Editar cartão", "Atualize os dados do seu cartão"]
+    : ["NOVO CARTÃO", "Adicionar cartão", "Cadastre os dados do seu cartão"];
+  [eyebrow.textContent, title.textContent, subtitle.textContent] = header;
   body.innerHTML = cardFormTemplate();
   dialog.showModal();
   if (mode === "limit") document.querySelector("#card-form [name='limit']")?.focus();

@@ -179,9 +179,13 @@
     <form id="card-form" method="dialog">
       <div class="sheet-handle"></div>
       <header class="sheet-header">
-        <div>
-          <span class="eyebrow">Cartão de crédito</span>
-          <h2 id="card-form-title">Novo cartão</h2>
+        <div class="card-header-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M3.5 10h17M7 14.5h3.5"/></svg>
+        </div>
+        <div class="card-header-copy">
+          <span class="eyebrow" id="card-form-eyebrow">NOVO CARTÃO</span>
+          <h2 id="card-form-title">Adicionar cartão</h2>
+          <p id="card-form-subtitle">Cadastre os dados do seu cartão</p>
         </div>
         <button class="icon-button" type="button" data-close-card-dialog aria-label="Fechar">×</button>
       </header>
