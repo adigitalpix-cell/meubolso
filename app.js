@@ -3676,7 +3676,10 @@ function supportTemplate() {
 function userSupportTemplate() {
   const tickets = (db.supportTickets || []).filter(ticket => ticket.userId === session).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return `
-    <div class="page-title"><span class="eyebrow">Suporte</span><h1>Falar com o Suporte</h1><p>Envie sua dúvida para o administrador.</p></div>
+    <button class="receivables-back-header" data-view="profile" aria-label="Voltar para o perfil">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+      <span><strong>Falar com o Suporte</strong><small>Envie sua dúvida ao suporte.</small></span>
+    </button>
     <form class="admin-form" id="support-form">
       <h2>Nova mensagem</h2>
       <label class="field"><span>Assunto</span><input name="subject" required maxlength="80" placeholder="Ex.: Dúvida sobre renovação"></label>
