@@ -96,6 +96,7 @@ let editingPurchaseId = null;
 let selectedPurchaseId = null;
 let editingInstallmentDate = null;
 let dashboardDetail = null;
+let homeOverviewTab = "summary";
 let receivablesReturnView = "home";
 let receivedIncomeReturnView = "home";
 let paidExpenseReturnView = "home";
@@ -1668,28 +1669,70 @@ function homeTemplate() {
   }
   const dashboard = financialDashboard();
   return `
-    ${expiryNotice()}
-    <article class="balance-card premium-balance-card">
-      <div class="premium-balance-heading"><small>Saldo atual</small></div>
-      <h2>${money(dashboard.balance)}</h2>
-      <div class="balance-meta premium-balance-meta">
-        <div><button class="balance-info-trigger" data-balance-info="income" data-balance-message="Total das receitas que você recebeu durante o mês atual."><span>Receitas do mês</span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.2"/></svg></button><strong>+ ${money(dashboard.receivedMonth)}</strong></div>
-        <div><button class="balance-info-trigger" data-balance-info="expense" data-balance-message="Total das despesas do mês atual, incluindo despesas pagas e despesas ainda a pagar."><span>Despesas do mês</span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.2"/></svg></button><strong>- ${money(dashboard.monthExpense)}</strong></div>
+    <section class="home-overview-page">
+      <div class="home-overview-tabs" role="tablist" aria-label="Visão financeira">
+        ${homeOverviewTabButton("summary", "Resumo", `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></svg>`)}
+        ${homeOverviewTabButton("income", "Receitas", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v13h13M6 17l5-5 3 3 5-6M15 9h4v4"/></svg>`)}
+        ${homeOverviewTabButton("expense", "Despesas", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v13h13M6 9l5 5 3-3 5 6M15 17h4v-4"/></svg>`)}
+      </div>
+      ${homeOverviewCard(dashboard)}
+    </section>`;
+}
+
+function homeOverviewTabButton(tab, label, icon) {
+  const active = homeOverviewTab === tab;
+  return `<button class="home-overview-tab ${active ? "active" : ""} ${tab}" type="button" role="tab" aria-selected="${active}" data-home-overview-tab="${tab}">${icon}<span>${label}</span></button>`;
+}
+
+function homeOverviewMetric(label, value, tone, action = null) {
+  const icon = tone === "expense"
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7v11h14M6 9l5 5 3-3 5 6M15 17h4v-4"/></svg>`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18h14M6 16l5-5 3 3 5-7M15 7h4v4"/></svg>`;
+  const title = action?.message
+    ? `<span class="home-overview-metric-label">${label}<button class="home-overview-info" type="button" data-balance-info="${action.owner}" data-balance-message="${escapeAttribute(action.message)}" aria-label="Informação sobre ${escapeAttribute(label)}">!</button></span>`
+    : `<span>${label}</span>`;
+  const content = `<div class="home-overview-metric-icon">${icon}</div><div>${title}<strong>${value}</strong></div>`;
+  return action?.detail
+    ? `<button class="home-overview-metric ${tone} is-clickable" type="button" data-dashboard-detail="${action.detail}" aria-label="Abrir ${escapeAttribute(label)}">${content}</button>`
+    : `<div class="home-overview-metric ${tone}">${content}</div>`;
+}
+
+function homeOverviewCard(dashboard) {
+  const content = {
+    summary: {
+      label: "Saldo atual",
+      headline: money(dashboard.balance),
+      metrics: [
+        ["Receitas do mês", `+ ${money(dashboard.receivedMonth)}`, "income", { owner: "income", message: "Total das receitas que você recebeu durante o mês atual." }],
+        ["Despesas do mês", `- ${money(dashboard.monthExpense)}`, "expense", { owner: "expense", message: "Total das despesas do mês atual, incluindo despesas pagas e despesas ainda a pagar." }]
+      ]
+    },
+    income: {
+      label: "Receitas",
+      metrics: [
+        ["Recebido no mês", money(dashboard.receivedMonth), "income", { detail: "received" }],
+        ["A receber no mês", money(dashboard.toReceiveMonth), "expense", { detail: "toReceive" }]
+      ]
+    },
+    expense: {
+      label: "Despesas",
+      metrics: [
+        ["Pago no mês", money(dashboard.paidMonth), "income", { detail: "paid" }],
+        ["A pagar no mês", money(dashboard.toPayMonth), "expense", { detail: "toPay" }]
+      ]
+    }
+  }[homeOverviewTab] || null;
+  if (!content) return "";
+  return `
+    <article class="balance-card home-overview-card ${content.headline ? "has-headline" : "metrics-only"}" aria-live="polite">
+      <div class="home-overview-card-copy">
+        <small>${content.label}</small>
+        ${content.headline ? `<h2>${content.headline}</h2>` : ""}
+        <div class="home-overview-accent" aria-hidden="true"><i></i></div>
+        <div class="home-overview-metrics">${content.metrics.map(metric => homeOverviewMetric(...metric)).join("")}</div>
       </div>
     </article>
-    <div class="balance-info-popover" data-balance-popover role="status" hidden></div>
-    <div class="dashboard-grid">
-      ${dashboardShortcut("invoice", "Fatura atual", money(dashboard.invoice))}
-      ${dashboardShortcut("cards", "Limite disponível", money(dashboard.availableLimit))}
-      ${dashboardShortcut("today", "Vence hoje", dashboard.dueToday)}
-      ${dashboardShortcut("soon", "Próximos 7 dias", dashboard.dueSoon)}
-      ${dashboardShortcut("overdue", "Em atraso", dashboard.overdue, "danger-card")}
-      ${dashboardShortcut("overdueValue", "Valor em atraso", money(dashboard.overdueAmount), "danger-card")}
-      ${dashboardShortcut("received", "Recebido no mês", money(dashboard.receivedMonth))}
-      ${dashboardShortcut("toReceive", "A receber no mês", money(dashboard.toReceiveMonth))}
-      ${dashboardShortcut("paid", "Pago no mês", money(dashboard.paidMonth))}
-      ${dashboardShortcut("toPay", "A pagar no mês", money(dashboard.toPayMonth))}
-    </div>`;
+    <div class="balance-info-popover" data-balance-popover role="status" hidden></div>`;
 }
 
 function profileFinancialDashboardTemplate() {
@@ -2014,6 +2057,9 @@ function closeBalanceInfoPopover() {
   if (!popover) return;
   popover.hidden = true;
   popover.dataset.owner = "";
+  popover.classList.remove("anchor-above", "anchor-below", "anchor-left", "anchor-right");
+  popover.style.removeProperty("--popover-arrow-x");
+  popover.style.removeProperty("--popover-arrow-y");
   clearTimeout(closeBalanceInfoPopover.timer);
 }
 
@@ -2027,15 +2073,45 @@ function toggleBalanceInfoPopover(button) {
   }
   popover.textContent = button.dataset.balanceMessage;
   popover.dataset.owner = owner;
+  popover.classList.remove("anchor-above", "anchor-below", "anchor-left", "anchor-right");
   popover.hidden = false;
   const rect = button.getBoundingClientRect();
-  const cardRect = button.closest(".balance-card")?.getBoundingClientRect() || rect;
-  const width = Math.min(280, window.innerWidth - 24);
+  const viewportGap = 12;
+  const anchorGap = 10;
+  const width = Math.min(260, window.innerWidth - viewportGap * 2);
   popover.style.width = `${width}px`;
-  popover.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))}px`;
-  popover.style.top = `${cardRect.bottom + 8}px`;
   const popoverRect = popover.getBoundingClientRect();
-  if (popoverRect.bottom > window.innerHeight - 12) popover.style.top = `${Math.max(12, cardRect.top - popoverRect.height - 8)}px`;
+  const anchorCenterX = rect.left + rect.width / 2;
+  const anchorCenterY = rect.top + rect.height / 2;
+  const centeredLeft = Math.max(viewportGap, Math.min(anchorCenterX - width / 2, window.innerWidth - width - viewportGap));
+  const aboveTop = rect.top - popoverRect.height - anchorGap;
+  const rightLeft = rect.right + anchorGap;
+  const leftLeft = rect.left - width - anchorGap;
+  let left = centeredLeft;
+  let top;
+  let position;
+  if (aboveTop >= viewportGap) {
+    top = aboveTop;
+    position = "above";
+    popover.style.setProperty("--popover-arrow-x", `${Math.max(14, Math.min(anchorCenterX - left, width - 14))}px`);
+  } else if (rightLeft + width <= window.innerWidth - viewportGap) {
+    left = rightLeft;
+    top = Math.max(viewportGap, Math.min(anchorCenterY - popoverRect.height / 2, window.innerHeight - popoverRect.height - viewportGap));
+    position = "right";
+    popover.style.setProperty("--popover-arrow-y", `${Math.max(14, Math.min(anchorCenterY - top, popoverRect.height - 14))}px`);
+  } else if (leftLeft >= viewportGap) {
+    left = leftLeft;
+    top = Math.max(viewportGap, Math.min(anchorCenterY - popoverRect.height / 2, window.innerHeight - popoverRect.height - viewportGap));
+    position = "left";
+    popover.style.setProperty("--popover-arrow-y", `${Math.max(14, Math.min(anchorCenterY - top, popoverRect.height - 14))}px`);
+  } else {
+    top = Math.min(rect.bottom + anchorGap, window.innerHeight - popoverRect.height - viewportGap);
+    position = "below";
+    popover.style.setProperty("--popover-arrow-x", `${Math.max(14, Math.min(anchorCenterX - left, width - 14))}px`);
+  }
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.max(viewportGap, top)}px`;
+  popover.classList.add(`anchor-${position}`);
   clearTimeout(closeBalanceInfoPopover.timer);
   closeBalanceInfoPopover.timer = setTimeout(closeBalanceInfoPopover, 4000);
 }
@@ -4085,6 +4161,12 @@ async function registerUser(event) {
 }
 
 function bindAppEvents() {
+  document.querySelectorAll("[data-home-overview-tab]").forEach(button => button.addEventListener("click", () => {
+    const tab = button.dataset.homeOverviewTab;
+    if (!["summary", "income", "expense"].includes(tab) || tab === homeOverviewTab) return;
+    homeOverviewTab = tab;
+    render();
+  }));
   document.querySelectorAll("[data-balance-info]").forEach(button => button.addEventListener("click", event => {
     event.stopPropagation();
     toggleBalanceInfoPopover(event.currentTarget);
