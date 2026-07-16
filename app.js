@@ -3326,11 +3326,11 @@ function latestMonthlyPayment(purchase) {
 function purchaseEditorTemplate() {
   const cards = userCards();
   const editing = editingPurchaseId ? userCardPurchases().find(purchase => purchase.id === editingPurchaseId) : null;
-  const title = editing ? "Editar compra" : "Nova compra";
   return `
-    <div class="page-title"><span class="eyebrow">Compra no cartão</span><h1>${title}</h1><p>Informe os dados da compra e o parcelamento.</p></div>
-    ${purchaseFormTemplate(cards)}
-    <button class="secondary-button" data-view="cardPurchases">Voltar para compras</button>`;
+    ${cardPurchasesTemplate()}
+    <dialog id="purchase-dialog" class="sheet card-sheet purchase-sheet">
+      ${purchaseFormTemplate(cards, editing)}
+    </dialog>`;
 }
 
 function installmentsTemplate() {
@@ -3415,23 +3415,41 @@ function cardFormTemplate() {
     </div>`;
 }
 
-function purchaseFormTemplate(cards) {
-  const editing = editingPurchaseId ? userCardPurchases().find(purchase => purchase.id === editingPurchaseId) : null;
+function purchaseFormTemplate(cards, currentPurchase = null) {
+  const editing = currentPurchase || (editingPurchaseId ? userCardPurchases().find(purchase => purchase.id === editingPurchaseId) : null);
   const card = cards.find(item => item.id === (editing?.cardId || selectedCardId)) || cards[0];
+  const installmentCount = Number(editing?.installments || 1);
+  const availableLimit = availableCardLimit(card?.id);
   return `
-    <form class="admin-form" id="purchase-form">
-      <h2>${editing ? "Editar compra" : "Nova compra"}</h2>
-      <input type="hidden" name="id" value="${editing?.id || ""}">
-      <label class="field"><span>Cartão</span><select name="cardId">${cards.map(card => `<option value="${card.id}" ${(editing?.cardId || selectedCardId) === card.id ? "selected" : ""}>${escapeHtml(card.name)} - ${escapeHtml(card.brand)}</option>`).join("")}</select></label>
-      <label class="field"><span>Nome da compra</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Celular"></label>
-      <label class="field"><span>Valor total</span><div class="money-input"><b>R$</b><input name="amount" required inputmode="decimal" value="${editing ? String(editing.amount).replace(".", ",") : ""}" placeholder="0,00"></div></label>
-      <div class="form-grid">
-        <label class="field"><span>Pagamento</span><select name="installments">${Array.from({ length: 12 }, (_, index) => `<option value="${index + 1}" ${editing?.installments === index + 1 ? "selected" : ""}>${index === 0 ? "À vista" : `${index + 1}x`}</option>`).join("")}</select></label>
-        <div class="field"><span>Data de fechamento da fatura</span><div class="static-field" data-invoice-info>Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}</div></div>
+    <form id="purchase-form">
+      <div class="sheet-handle"></div>
+      <header class="sheet-header">
+        <div class="card-header-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2.5"/><path d="M3.5 10h17M8 14.5h4M17 13v4M15 15h4"/></svg></div>
+        <div class="card-header-copy">
+          <span class="eyebrow">${editing ? "EDITAR COMPRA" : "NOVA COMPRA"}</span>
+          <h2>${editing ? "Editar compra" : "Adicionar compra"}</h2>
+          <p>Informe os dados da compra e do parcelamento</p>
+        </div>
+        <button class="icon-button" type="button" data-close-purchase-dialog aria-label="Fechar">×</button>
+      </header>
+      <div class="card-modal-fields purchase-modal-fields">
+        <input type="hidden" name="id" value="${editing?.id || ""}">
+        <input type="hidden" name="cardId" value="${card?.id || ""}">
+        <div class="purchase-fixed-card"><span>Cartão</span><strong>${escapeHtml(card?.name || "Cartão")} • ${escapeHtml(card?.brand || "-")} • Lim. disp. ${money(availableLimit)}</strong></div>
+        <label class="field card-name-field"><span>Nome da compra</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Ex.: Celular"></label>
+        <label class="field card-limit-field purchase-value-field"><span>Valor total</span><div class="money-input"><b>R$</b><input name="amount" required inputmode="decimal" value="${editing ? String(editing.amount).replace(".", ",") : ""}" placeholder="0,00"></div></label>
+        <div class="form-grid card-day-grid purchase-payment-grid">
+          <label class="field"><span>Pagamento</span><select data-purchase-payment-mode><option value="cash" ${installmentCount === 1 ? "selected" : ""}>À vista</option><option value="installments" ${installmentCount > 1 ? "selected" : ""}>Parcelado</option></select></label>
+          <div class="field"><span>Fatura</span><div class="static-field" data-invoice-info>Fecha dia ${card?.closingDay || "-"} • Vence dia ${card?.dueDay || "-"}</div></div>
+        </div>
+        <div class="purchase-installment-fields" data-purchase-installment-fields ${installmentCount === 1 ? "hidden" : ""}>
+          <label class="field"><span>Quantidade de parcelas</span><select name="installments"><option value="1" ${installmentCount === 1 ? "selected" : ""}>1x</option>${Array.from({ length: 11 }, (_, index) => `<option value="${index + 2}" ${installmentCount === index + 2 ? "selected" : ""}>${index + 2}x</option>`).join("")}</select></label>
+          <div class="purchase-installment-value"><span>Valor da parcela</span><strong data-purchase-installment-value>${money(Number(editing?.amount || 0) / Math.max(installmentCount, 1))}</strong></div>
+        </div>
+        <label class="field"><span class="field-title">Categoria</span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
+        <label class="field"><span>Status</span><select name="status"><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
+        <button class="primary-button card-save-button purchase-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar compra</span></button>
       </div>
-      <label class="field"><span class="field-title">Categoria</span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
-      <label class="field"><span>Status</span><select name="status"><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
-      <button class="primary-button">Salvar compra</button>
     </form>`;
 }
 
@@ -4230,8 +4248,20 @@ function bindAppEvents() {
   });
   document.querySelector("#card-form")?.addEventListener("submit", saveCard);
   document.querySelector("[data-close-card-dialog]")?.addEventListener("click", closeCardDialog);
-  document.querySelector("#purchase-form")?.addEventListener("submit", saveCardPurchase);
-  document.querySelector("#purchase-form select[name='cardId']")?.addEventListener("change", updatePurchaseInvoiceInfo);
+  const purchaseForm = document.querySelector("#purchase-form");
+  purchaseForm?.addEventListener("submit", saveCardPurchase);
+  purchaseForm?.querySelector("[data-purchase-payment-mode]")?.addEventListener("change", updatePurchasePaymentFields);
+  purchaseForm?.elements.installments?.addEventListener("change", updatePurchasePaymentFields);
+  purchaseForm?.elements.amount?.addEventListener("input", updatePurchasePaymentFields);
+  document.querySelector("[data-close-purchase-dialog]")?.addEventListener("click", closePurchaseEditor);
+  const purchaseDialog = document.querySelector("#purchase-dialog");
+  if (purchaseDialog) {
+    purchaseDialog.addEventListener("cancel", event => {
+      event.preventDefault();
+      closePurchaseEditor();
+    });
+    if (!purchaseDialog.open) purchaseDialog.showModal();
+  }
   document.querySelector("#password-form")?.addEventListener("submit", changePassword);
   document.querySelector("#support-form")?.addEventListener("submit", saveSupportTicket);
   document.querySelectorAll("[data-pay-installment]").forEach(button => button.addEventListener("click", () => payCardInstallment(button.dataset.payInstallment, button.dataset.installmentKey)));
@@ -5225,10 +5255,29 @@ function updateStatusOptions() {
     : `<option value="pending">Não pago</option><option value="paid">Pago</option>`;
 }
 
-function updatePurchaseInvoiceInfo(event) {
-  const card = userCards().find(item => item.id === event.currentTarget.value);
-  const target = document.querySelector("[data-invoice-info]");
-  if (target) target.textContent = `Dia ${card?.closingDay || "-"} · Vence dia ${card?.dueDay || "-"}`;
+function updatePurchasePaymentFields() {
+  const form = document.querySelector("#purchase-form");
+  if (!form) return;
+  const paymentMode = form.querySelector("[data-purchase-payment-mode]")?.value || "cash";
+  const installmentFields = form.querySelector("[data-purchase-installment-fields]");
+  if (paymentMode === "cash") {
+    form.elements.installments.value = "1";
+    installmentFields.hidden = true;
+  } else {
+    if (Number(form.elements.installments.value) < 2) form.elements.installments.value = "2";
+    installmentFields.hidden = false;
+  }
+  const amount = parseMoney(form.elements.amount.value);
+  const installments = Math.max(Number(form.elements.installments.value || 1), 1);
+  const installmentValue = form.querySelector("[data-purchase-installment-value]");
+  if (installmentValue) installmentValue.textContent = money(Number.isFinite(amount) ? amount / installments : 0);
+}
+
+function closePurchaseEditor() {
+  document.querySelector("#purchase-dialog")?.close();
+  editingPurchaseId = null;
+  currentView = "cardPurchases";
+  render();
 }
 
 async function saveSupportTicket(event) {

@@ -1410,6 +1410,55 @@ body:has(#transaction-dialog[open]) { overflow: hidden; }
 
 body:has(#card-dialog[open]) { overflow: hidden; }
 
+/* Nova compra no cartão · somente elementos exclusivos do fluxo */
+.purchase-fixed-card {
+  margin-bottom: 15px;
+  padding: 12px 14px;
+  border: 1px solid #d9e7df;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f7fbf8, #edf7f1);
+}
+.purchase-fixed-card span { display: block; margin-bottom: 4px; color: #52645c; font-size: .68rem; font-weight: 760; }
+.purchase-fixed-card strong { display: block; color: #095a40; font-size: .79rem; font-weight: 850; line-height: 1.35; }
+.purchase-payment-grid > * { min-width: 0; }
+.purchase-sheet .static-field {
+  min-height: 55px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #d9e3de;
+  border-radius: 15px;
+  color: #3e554b;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(16, 51, 40, .025);
+  font-size: .67rem;
+  font-weight: 720;
+  line-height: 1.35;
+}
+.purchase-installment-fields {
+  margin: 0 0 14px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 11px;
+  border: 1px solid #dbe9e1;
+  border-radius: 16px;
+  background: #f3f9f5;
+}
+.purchase-installment-fields[hidden] { display: none; }
+.purchase-installment-fields .field { min-width: 0; margin: 0; }
+.purchase-installment-value { min-width: 0; padding: 0 4px 8px; }
+.purchase-installment-value span { display: block; color: #566a60; font-size: .68rem; font-weight: 760; }
+.purchase-installment-value strong { display: block; margin-top: 7px; color: #086146; font-size: 1rem; font-weight: 900; white-space: nowrap; }
+
+@media (max-width: 380px) {
+  .purchase-sheet .static-field { padding-inline: 8px; font-size: .59rem; }
+  .purchase-fixed-card strong { font-size: .69rem; }
+}
+
+body:has(#purchase-dialog[open]) { overflow: hidden; }
+
 /* Categorias · refinamento visual MB C2 */
 .categories-hero {
   grid-template-columns: auto minmax(0, 1fr) auto;
