@@ -49,3 +49,11 @@ README.md
 ## Observação
 
 O app usa Supabase via REST API e sincroniza os dados por `usuario_id`.
+
+## Retomada do projeto
+
+Para continuar o projeto em uma nova conversa, com outra IA ou com outro desenvolvedor, comece por:
+
+```txt
+DOCUMENTACAO_PROJETO/00_INICIAR_NOVA_CONVERSA.md
+```

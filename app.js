@@ -4,11 +4,41 @@ const OFFLINE_QUEUE_KEY = "minhas-financas-offline-queue";
 const ACTIVITY_LOG_KEY = "minhas-financas-activity-log";
 const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
+const CARD_DUE_NOTIFICATION_LOG_KEY = "minhas-financas-card-due-notifications";
 const ADMIN_NOTIFICATION_KEY = "meu-bolso-admin-notifications";
 const APP_NAME = "MEU BOLSO";
 const APP_UPDATED_AT = "16/07/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
+const AUTH_DUAL_LOGIN_ENABLED = SUPABASE_CONFIG.authDualLoginEnabled === true;
+const AUTH_DUAL_LOGIN_PROJECT_REF = "ncgfwatsciwzzhqlspvy";
+const AUTH_DUAL_LOGIN_CONFIG_VALID = !AUTH_DUAL_LOGIN_ENABLED || (
+  SUPABASE_CONFIG.projectRef === AUTH_DUAL_LOGIN_PROJECT_REF
+  && SUPABASE_CONFIG.url === `https://${AUTH_DUAL_LOGIN_PROJECT_REF}.supabase.co`
+);
+const AUTH_SESSION_MODE = "auth";
+const LEGACY_SESSION_MODE = "legacy";
+const MASTER_VIEW_MODE = "master";
+const USER_VIEW_MODE = "user";
+const SESSION_VERSION = 3;
+const REST_REQUEST_TIMEOUT_MS = 15000;
+const USER_PROFILE_ADDRESS_FIELDS_ENABLED = SUPABASE_CONFIG.userProfileAddressFieldsEnabled !== false;
+const USER_PROFILE_ADDRESS_FIELDS = ["endereco", "cidade", "estado"];
+const PUBLIC_USER_FIELDS = [
+  "id", "nome", "usuario", "whatsapp", "email",
+  ...(USER_PROFILE_ADDRESS_FIELDS_ENABLED ? USER_PROFILE_ADDRESS_FIELDS : []),
+  "data_cadastro", "data_vencimento", "status", "perfil", "valor_renovacao", "auth_user_id"
+].join(",");
+const supabaseAuthClient = AUTH_DUAL_LOGIN_ENABLED && AUTH_DUAL_LOGIN_CONFIG_VALID && SUPABASE_READY && window.supabase?.createClient
+  ? window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storageKey: "meu-bolso-auth-session"
+      }
+    })
+  : null;
 const DEFAULT_CATEGORY_DEFINITIONS = [
   { name: "Alimentação", type: "expense" },
   { name: "Moradia", type: "expense" },
@@ -30,11 +60,15 @@ let serviceWorkerReloading = false;
 let isOfflineMode = !navigator.onLine;
 let isSyncingOfflineQueue = false;
 let dueNotificationTimer = null;
+let removedSensitiveOfflineOperations = 0;
+let databaseLoadGeneration = 0;
+const activeDatabaseLoads = new Map();
+let activeAutoUpdatePromise = null;
 
 const seed = {
   users: [
-    { id: "master", name: "Alex", username: "alex", password: "sepi25al22Mu", role: "master", whatsapp: "", email: "alex.cf10@outlook.com", createdAt: dateOffset(-365) },
-    { id: "user-demo", name: "Mariana Costa", username: "mariana", password: "123456", role: "user", whatsapp: "", email: "", createdAt: dateOffset(-30), accessExpiresAt: futureDate(365), blocked: false, renewalPrice: 49.9 }
+    { id: "master", name: "Alex", username: "alex", role: "master", whatsapp: "", email: "alex.cf10@outlook.com", createdAt: dateOffset(-365) },
+    { id: "user-demo", name: "Mariana Costa", username: "mariana", role: "user", whatsapp: "", email: "", createdAt: dateOffset(-30), accessExpiresAt: futureDate(365), blocked: false, renewalPrice: 49.9 }
   ],
   transactions: {
     "user-demo": [
@@ -66,7 +100,11 @@ const seed = {
 };
 
 let db = normalizeDatabase(structuredClone(seed));
-let session = loadSavedSession()?.id || null;
+const initialSavedSession = loadSavedSession();
+let session = initialSavedSession?.financialUserId || initialSavedSession?.id || null;
+let sessionMode = initialSavedSession?.authMode || initialSavedSession?.mode || LEGACY_SESSION_MODE;
+let sessionAuthUserId = initialSavedSession?.authUserId || null;
+let viewMode = [MASTER_VIEW_MODE, USER_VIEW_MODE].includes(initialSavedSession?.viewMode) ? initialSavedSession.viewMode : USER_VIEW_MODE;
 let isBooting = true;
 let lastSyncError = "";
 let currentView = "home";
@@ -80,6 +118,8 @@ let cardsReturnView = "home";
 let editingTransactionId = null;
 let editingUserId = null;
 let userFormOpen = false;
+let activeUserSavePromise = null;
+let userFiltersOpen = false;
 let userListScope = "all";
 let userSearch = "";
 let userStatusFilter = "all";
@@ -91,10 +131,11 @@ let reportMonth = new Date().toISOString().slice(0, 7);
 let reportYear = String(new Date().getFullYear());
 let purchaseFormOpen = false;
 let selectedCardId = null;
+let cardPurchaseFilter = "pending";
+let cardPurchaseMonth = "";
 let editingCardId = null;
 let editingPurchaseId = null;
 let selectedPurchaseId = null;
-let editingInstallmentDate = null;
 let dashboardDetail = null;
 let homeOverviewTab = "summary";
 let receivablesReturnView = "home";
@@ -146,7 +187,6 @@ function normalizeDatabase(data = structuredClone(seed)) {
     if (user.role === "master") {
       if (!user.name) user.name = "Alex";
       if (!user.username) user.username = "alex";
-      if (!user.password || user.password === "master123") user.password = "sepi25al22Mu";
       if (!user.email) user.email = "alex.cf10@outlook.com";
     }
     if (!user.whatsapp) user.whatsapp = "";
@@ -175,6 +215,10 @@ function normalizeDatabase(data = structuredClone(seed)) {
   return data;
 }
 
+function emptyDatabase() {
+  return normalizeDatabase({ users: [], transactions: {}, cards: {}, cardPurchases: {}, categories: {}, accounts: {}, renewals: [], supportTickets: [] });
+}
+
 function normalizeCategoryRecord(item, index = 0) {
   if (typeof item === "string") return { id: crypto.randomUUID(), name: item, type: "both", active: true };
   const type = ["income", "expense", "both"].includes(item?.type) ? item.type : "both";
@@ -193,54 +237,146 @@ function defaultCategoryRecords() {
 function loadSavedSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    return saved?.id ? saved : null;
+    const savedAuthMode = saved?.authMode || saved?.mode;
+    if (saved?.version === SESSION_VERSION && saved?.financialUserId && [AUTH_SESSION_MODE, LEGACY_SESSION_MODE].includes(savedAuthMode)) {
+      return { ...saved, authMode: savedAuthMode };
+    }
+    if (saved?.financialUserId || saved?.id) {
+      return {
+        version: SESSION_VERSION,
+        authMode: [AUTH_SESSION_MODE, LEGACY_SESSION_MODE].includes(savedAuthMode) ? savedAuthMode : LEGACY_SESSION_MODE,
+        financialUserId: saved.financialUserId || saved.id,
+        authUserId: saved.authUserId || null,
+        username: saved.username || "",
+        viewMode: [MASTER_VIEW_MODE, USER_VIEW_MODE].includes(saved.viewMode) ? saved.viewMode : null,
+        savedAt: saved.savedAt || ""
+      };
+    }
+    return null;
   } catch {
     localStorage.removeItem(SESSION_KEY);
     return null;
   }
 }
 
-function saveSession(user) {
+function normalizeViewModeForUser(user, requestedViewMode = viewMode) {
+  if (user?.role !== "master") return USER_VIEW_MODE;
+  return requestedViewMode === USER_VIEW_MODE ? USER_VIEW_MODE : MASTER_VIEW_MODE;
+}
+
+function saveSession(user, { mode = sessionMode, authUserId = sessionAuthUserId, requestedViewMode = viewMode } = {}) {
   if (!user?.id) return;
+  const normalizedMode = mode === AUTH_SESSION_MODE ? AUTH_SESSION_MODE : LEGACY_SESSION_MODE;
   session = user.id;
+  sessionMode = normalizedMode;
+  sessionAuthUserId = normalizedMode === AUTH_SESSION_MODE ? authUserId || user.authUserId || null : null;
+  viewMode = normalizeViewModeForUser(user, requestedViewMode);
   localStorage.setItem(SESSION_KEY, JSON.stringify({
-    id: user.id,
-    name: user.name,
+    version: SESSION_VERSION,
+    authMode: sessionMode,
+    financialUserId: user.id,
+    authUserId: sessionAuthUserId,
     username: user.username,
-    role: user.role,
-    status: user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : "ativo",
-    accessExpiresAt: user.accessExpiresAt || "",
+    viewMode,
     savedAt: new Date().toISOString()
   }));
 }
 
 function clearSession() {
+  invalidateDatabaseLoads();
   session = null;
+  sessionMode = LEGACY_SESSION_MODE;
+  sessionAuthUserId = null;
+  viewMode = USER_VIEW_MODE;
   localStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+function sanitizeCredentialFields(value, seen = new WeakMap()) {
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value);
+  const sanitized = Array.isArray(value) ? [] : {};
+  seen.set(value, sanitized);
+  Object.entries(value).forEach(([key, item]) => {
+    if (["password", "senha"].includes(key.toLocaleLowerCase("pt-BR"))) return sanitized;
+    sanitized[key] = sanitizeCredentialFields(item, seen);
+  });
+  return sanitized;
+}
+
+function sanitizeDatabaseForCache(database) {
+  return sanitizeCredentialFields(database);
+}
+
+function containsCredentialField(value, seen = new WeakSet()) {
+  if (Array.isArray(value)) return value.some(item => containsCredentialField(item, seen));
+  if (!value || typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  return Object.entries(value).some(([key, item]) => {
+    if (["password", "senha"].includes(key.toLocaleLowerCase("pt-BR"))) return true;
+    return containsCredentialField(item, seen);
+  });
+}
+
+function onlineCredentialOperationError() {
+  const error = new Error("Esta operação requer conexão com a internet.");
+  error.code = "CREDENTIAL_OPERATION_REQUIRES_ONLINE";
+  return error;
+}
+
 function cacheDatabase() {
+  if (!session) return;
   try {
-    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify({ db, cachedAt: new Date().toISOString() }));
+    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify({
+      db: sanitizeDatabaseForCache(db),
+      financialUserId: session,
+      authMode: sessionMode,
+      contextScope: viewMode,
+      securityVersion: 1,
+      cachedAt: new Date().toISOString()
+    }));
   } catch (error) {
     console.warn("[MEU BOLSO][Offline] não foi possível salvar cache local", error);
   }
 }
 
-function loadCachedDatabase() {
+function sanitizeStoredDatabaseCache() {
   try {
     const cached = JSON.parse(localStorage.getItem(LOCAL_DB_KEY) || "null");
-    return cached?.db ? normalizeDatabase(cached.db) : null;
+    if (!cached?.db) return cached;
+    const sanitizedCache = {
+      ...sanitizeCredentialFields(cached),
+      db: sanitizeDatabaseForCache(cached.db),
+      securityVersion: 1,
+      cachedAt: cached.cachedAt || new Date().toISOString()
+    };
+    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(sanitizedCache));
+    return sanitizedCache;
   } catch {
     localStorage.removeItem(LOCAL_DB_KEY);
     return null;
   }
 }
 
+function loadCachedDatabase() {
+  const cached = sanitizeStoredDatabaseCache();
+  if (!cached?.db || !session) return null;
+  const cachedAuthMode = cached.authMode || cached.sessionMode;
+  if (cached.financialUserId !== session || cachedAuthMode !== sessionMode || cached.contextScope !== viewMode) return null;
+  return normalizeDatabase(cached.db);
+}
+
 function offlineQueue() {
   try {
-    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+    const parsed = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+    const queue = Array.isArray(parsed) ? parsed : [];
+    const safeQueue = queue.filter(operation => !containsCredentialField(operation?.body));
+    const removedCount = queue.length - safeQueue.length;
+    if (removedCount) {
+      removedSensitiveOfflineOperations += removedCount;
+      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(safeQueue));
+    }
+    return safeQueue;
   } catch {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
     return [];
@@ -252,8 +388,18 @@ function saveOfflineQueue(queue) {
 }
 
 function queueSupabaseOperation(operation) {
+  if (!session) throw new Error("Sessão necessária para salvar offline.");
+  if (operation?.table === "usuarios" && containsCredentialField(operation.body)) throw onlineCredentialOperationError();
   const queue = offlineQueue();
-  queue.push({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...operation });
+  queue.push({
+    ...operation,
+    id: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    financialUserId: session,
+    authMode: sessionMode,
+    sessionMode,
+    contextScope: viewMode
+  });
   saveOfflineQueue(queue);
   isOfflineMode = true;
   cacheDatabase();
@@ -261,6 +407,31 @@ function queueSupabaseOperation(operation) {
 
 function hasOfflineQueue() {
   return offlineQueue().length > 0;
+}
+
+function notifyRemovedSensitiveOfflineOperations() {
+  if (!removedSensitiveOfflineOperations) return;
+  removedSensitiveOfflineOperations = 0;
+  setTimeout(() => showToast("Uma operação de credencial offline foi removida. Refá-la com internet."), 0);
+}
+
+function operationAuthMode(operation) {
+  return operation?.authMode || operation?.sessionMode || LEGACY_SESSION_MODE;
+}
+
+function operationBelongsToCurrentContext(operation) {
+  if (operation?.financialUserId !== session || operationAuthMode(operation) !== sessionMode) return false;
+  if (operation.contextScope === viewMode) return true;
+  if (operation.contextScope) return false;
+  return hasMasterRole() ? viewMode === MASTER_VIEW_MODE : viewMode === USER_VIEW_MODE;
+}
+
+function hasPendingQueueForCurrentContext() {
+  return offlineQueue().some(operation => {
+    if (operation?.financialUserId !== session || operationAuthMode(operation) !== sessionMode) return false;
+    if (operation.contextScope) return operation.contextScope === viewMode;
+    return hasMasterRole() ? viewMode === MASTER_VIEW_MODE : viewMode === USER_VIEW_MODE;
+  });
 }
 
 function activityLog() {
@@ -299,7 +470,69 @@ function userActivityLog(userId = session) {
 }
 
 function isNetworkError(error) {
+  if (isRestRequestTimeoutError(error)) return false;
   return !navigator.onLine || error?.name === "TypeError" || /fetch|network|failed/i.test(error?.message || "");
+}
+
+function invalidateDatabaseLoads() {
+  databaseLoadGeneration += 1;
+  activeDatabaseLoads.clear();
+}
+
+function databaseLoadContext(financialUserId, contextScope = viewMode) {
+  return {
+    financialUserId,
+    authMode: sessionMode,
+    contextScope,
+    generation: databaseLoadGeneration
+  };
+}
+
+function databaseLoadContextKey(context) {
+  return [context.financialUserId, context.authMode, context.contextScope, context.generation].join("|");
+}
+
+function isDatabaseLoadContextCurrent(context) {
+  return Boolean(
+    context?.financialUserId
+    && context.financialUserId === session
+    && context.authMode === sessionMode
+    && context.contextScope === viewMode
+    && context.generation === databaseLoadGeneration
+  );
+}
+
+function hasActiveDatabaseLoadForCurrentContext() {
+  return [...activeDatabaseLoads.values()].some(item => isDatabaseLoadContextCurrent(item.context));
+}
+
+async function coordinateDatabaseLoad(loggedUser, contextScope, buildDatabase) {
+  const context = databaseLoadContext(loggedUser?.id, contextScope);
+  const key = databaseLoadContextKey(context);
+  const activeLoad = activeDatabaseLoads.get(key);
+  if (activeLoad) return activeLoad.promise;
+
+  const promise = (async () => {
+    const nextDb = await buildDatabase();
+    if (!isDatabaseLoadContextCurrent(context)) return db;
+
+    db = nextDb;
+    isOfflineMode = false;
+    if (contextScope === USER_VIEW_MODE) {
+      await ensureMonthlyOccurrences(loggedUser.id);
+      if (!isDatabaseLoadContextCurrent(context)) return db;
+    }
+    cacheDatabase();
+    logSupabaseLoad(loggedUser, db);
+    return db;
+  })();
+
+  activeDatabaseLoads.set(key, { context, promise });
+  try {
+    return await promise;
+  } finally {
+    if (activeDatabaseLoads.get(key)?.promise === promise) activeDatabaseLoads.delete(key);
+  }
 }
 
 async function loadDatabase() {
@@ -313,48 +546,86 @@ async function loadDatabase() {
     const user = await loadUserById(session);
     if (user) return loadScopedDatabase(user);
   }
-  const usuarios = await supabaseSelect("usuarios", "select=*");
+  const generation = databaseLoadGeneration;
+  const usuarios = await supabaseSelect("usuarios", `select=${PUBLIC_USER_FIELDS}`);
   const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
+  if (generation !== databaseLoadGeneration || session) return db;
   db = loaded;
   cacheDatabase();
   return loaded;
 }
 
 async function loadScopedDatabase(loggedUser) {
-  const isLoggedMaster = loggedUser.role === "master";
-  const userFilter = isLoggedMaster ? "" : `usuario_id=eq.${loggedUser.id}`;
-  const [usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
-    isLoggedMaster ? supabaseSelect("usuarios", "select=*") : Promise.resolve([userToSupabaseLike(loggedUser)]),
-    supabaseSelect("receitas", selectWithFilter(userFilter)),
-    supabaseSelect("despesas", selectWithFilter(userFilter)),
-    supabaseSelect("cartoes", selectWithFilter(userFilter)),
-    supabaseSelect("compras_cartao", selectWithFilter(userFilter)),
-    supabaseSelect("parcelas", selectWithFilter(userFilter)),
-    supabaseSelect("suporte", selectWithFilter(userFilter)),
-    supabaseSelect("renovacoes", selectWithFilter(userFilter)),
-    supabaseSelect("categorias", selectWithFilter(userFilter)),
-    supabaseSelect("tipos_conta", selectWithFilter(userFilter))
-  ]);
-  const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
-  if (isLoggedMaster) console.log("[MEU BOLSO][Supabase] SELECT usuarios master", usuarios.length, usuarios);
-  logSupabaseLoad(loggedUser, loaded);
-  isOfflineMode = false;
-  db = loaded;
-  if (!isLoggedMaster) await ensureMonthlyOccurrences(loggedUser.id);
-  cacheDatabase();
-  return loaded;
+  if (loggedUser?.role === "master" && viewMode === MASTER_VIEW_MODE) return loadMasterDatabase(loggedUser);
+  return loadPersonalDatabase(loggedUser);
+}
+
+async function loadMasterDatabase(loggedUser) {
+  if (loggedUser?.role !== "master" || viewMode !== MASTER_VIEW_MODE) throw new Error("Contexto Master Global não autorizado.");
+  return coordinateDatabaseLoad(loggedUser, MASTER_VIEW_MODE, async () => {
+    const [usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
+      supabaseSelect("usuarios", `select=${PUBLIC_USER_FIELDS}`),
+      supabaseSelect("receitas", "select=*"),
+      supabaseSelect("despesas", "select=*"),
+      supabaseSelect("cartoes", "select=*"),
+      supabaseSelect("compras_cartao", "select=*"),
+      supabaseSelect("parcelas", "select=*"),
+      supabaseSelect("suporte", "select=*"),
+      supabaseSelect("renovacoes", "select=*"),
+      supabaseSelect("categorias", "select=*"),
+      supabaseSelect("tipos_conta", "select=*")
+    ]);
+    const masterDatabase = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
+    masterDatabase.users = masterDatabase.users.map(user => sanitizeCredentialFields(user));
+    return masterDatabase;
+  });
+}
+
+async function loadPersonalDatabase(loggedUser) {
+  if (!loggedUser?.id) throw new Error("Usuário não encontrado no Supabase.");
+  return coordinateDatabaseLoad(loggedUser, USER_VIEW_MODE, async () => {
+    const userFilter = `usuario_id=eq.${loggedUser.id}`;
+    const [receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
+      supabaseSelect("receitas", selectWithFilter(userFilter)),
+      supabaseSelect("despesas", selectWithFilter(userFilter)),
+      supabaseSelect("cartoes", selectWithFilter(userFilter)),
+      supabaseSelect("compras_cartao", selectWithFilter(userFilter)),
+      supabaseSelect("parcelas", selectWithFilter(userFilter)),
+      supabaseSelect("suporte", selectWithFilter(userFilter)),
+      supabaseSelect("renovacoes", selectWithFilter(userFilter)),
+      supabaseSelect("categorias", selectWithFilter(userFilter)),
+      supabaseSelect("tipos_conta", selectWithFilter(userFilter))
+    ]);
+    const personalDatabase = fromSupabaseRows({
+      usuarios: [],
+      receitas,
+      despesas,
+      cartoes,
+      compras,
+      parcelas,
+      suporte,
+      renovacoes,
+      categorias,
+      tiposConta
+    });
+    personalDatabase.users = [sanitizeCredentialFields(loggedUser)];
+    const normalizedPersonalDatabase = normalizeDatabase(personalDatabase);
+    normalizedPersonalDatabase.users = normalizedPersonalDatabase.users.map(user => sanitizeCredentialFields(user));
+    return normalizedPersonalDatabase;
+  });
 }
 
 async function refreshMasterData() {
   const user = await loadUserById(session);
-  if (!user || user.role !== "master") throw new Error("Master não encontrado no Supabase.");
-  db = await loadScopedDatabase(user);
+  if (!user || user.role !== "master" || viewMode !== MASTER_VIEW_MODE) throw new Error("Contexto Master Global não autorizado.");
+  await loadMasterDatabase(user);
 }
 
 async function refreshCurrentUserData() {
   const user = await loadUserById(session);
   if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
-  db = await loadScopedDatabase(user);
+  if (viewMode === MASTER_VIEW_MODE) await loadMasterDatabase(user);
+  else await loadPersonalDatabase(user);
 }
 
 async function refreshUserFinancialData() {
@@ -366,74 +637,122 @@ async function refreshUserFinancialData() {
   }
   const user = currentUser() || await loadUserById(session);
   if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
-  const filter = `usuario_id=eq.${session}`;
-  const [receitas, despesas, cartoes, compras, parcelas, categorias, tiposConta] = await Promise.all([
-    supabaseSelect("receitas", selectWithFilter(filter)),
-    supabaseSelect("despesas", selectWithFilter(filter)),
-    supabaseSelect("cartoes", selectWithFilter(filter)),
-    supabaseSelect("compras_cartao", selectWithFilter(filter)),
-    supabaseSelect("parcelas", selectWithFilter(filter)),
-    supabaseSelect("categorias", selectWithFilter(filter)),
-    supabaseSelect("tipos_conta", selectWithFilter(filter))
-  ]);
-  console.log("[MEU BOLSO][Supabase] SELECT despesas usuario_id", session, despesas.length, despesas);
-  const loaded = normalizeDatabase(fromSupabaseRows({
-    usuarios: [userToSupabaseLike(user)],
-    receitas,
-    despesas,
-    cartoes,
-    compras,
-    parcelas,
-    suporte: [],
-    renovacoes: [],
-    categorias,
-    tiposConta
-  }));
-  db.users = db.users.some(item => item.id === user.id) ? db.users.map(item => item.id === user.id ? user : item) : [...db.users, user];
-  db.transactions[session] = loaded.transactions[session] || [];
-  db.cards[session] = loaded.cards[session] || [];
-  db.cardPurchases[session] = loaded.cardPurchases[session] || [];
-  db.categories[session] = loaded.categories[session] || defaultCategoryRecords();
-  db.accounts[session] = loaded.accounts[session] || [...DEFAULT_ACCOUNTS];
-  isOfflineMode = false;
-  await ensureMonthlyOccurrences(session);
-  cacheDatabase();
-  logSupabaseLoad(user, db);
+  await loadPersonalDatabase(user);
 }
 
 async function loadUserById(id) {
   if (!id) return null;
-  const rows = await supabaseSelect("usuarios", `select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
-  return rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+  const rows = await supabaseSelect("usuarios", `select=${PUBLIC_USER_FIELDS}&id=eq.${encodeURIComponent(id)}&limit=1`);
+  const user = rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+  return user ? sanitizeCredentialFields(user) : null;
 }
 
-async function loadUserByCredentials(username, password) {
-  const query = `select=*&usuario=eq.${encodeURIComponent(username)}&senha=eq.${encodeURIComponent(password)}&limit=1`;
+async function loadUserByUsername(username) {
+  const query = `select=${PUBLIC_USER_FIELDS}&usuario=eq.${encodeURIComponent(username)}&limit=1`;
   const rows = await supabaseSelect("usuarios", query);
   return rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
 }
 
-function selectWithFilter(filter = "") {
-  return filter ? `select=*&${filter}` : "select=*";
+async function loadRenewalById(renewalId) {
+  if (!renewalId) return null;
+  const rows = await supabaseSelect("renovacoes", `select=id,usuario_id,data_renovacao,nova_validade,valor&id=eq.${encodeURIComponent(renewalId)}&limit=1`);
+  return rows[0] || null;
 }
 
-function userToSupabaseLike(user) {
-  return {
-    id: user.id,
-    nome: user.name,
-    usuario: user.username,
-    senha: user.password,
-    whatsapp: user.whatsapp || "",
-    email: user.email || "",
-    endereco: user.address || "",
-    cidade: user.city || "",
-    estado: user.state || "",
-    data_cadastro: user.createdAt,
-    data_vencimento: user.accessExpiresAt,
-    status: user.blocked ? "bloqueado" : "ativo",
-    perfil: user.role === "master" ? "master" : "usuario",
-    valor_renovacao: Number(user.renewalPrice || 49.9)
-  };
+async function saveRenewalToSupabase(renewal) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  await supabaseRequest("renovacoes", {
+    method: "POST",
+    body: [{
+      id: renewal.id,
+      usuario_id: renewal.userId,
+      data_renovacao: renewal.date,
+      nova_validade: renewal.accessExpiresAt,
+      valor: renewal.amount
+    }],
+    prefer: "resolution=merge-duplicates,return=minimal",
+    queueOffline: false
+  });
+}
+
+async function loadUserByAuthId(authUserId) {
+  if (!authUserId) return null;
+  const query = `select=${PUBLIC_USER_FIELDS}&auth_user_id=eq.${encodeURIComponent(authUserId)}&limit=1`;
+  const rows = await supabaseSelect("usuarios", query);
+  return rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+}
+
+async function loadLegacyUserByCredentials(username, password) {
+  const query = `select=${PUBLIC_USER_FIELDS}&usuario=eq.${encodeURIComponent(username)}&senha=eq.${encodeURIComponent(password)}&auth_user_id=is.null&limit=1`;
+  const rows = await supabaseSelect("usuarios", query);
+  const user = rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+  return user ? sanitizeCredentialFields(user) : null;
+}
+
+async function validateLegacyPassword(username, password) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  const query = `select=${PUBLIC_USER_FIELDS}&usuario=eq.${encodeURIComponent(username)}&senha=eq.${encodeURIComponent(password)}&auth_user_id=is.null&limit=1`;
+  const rows = await supabaseSelect("usuarios", query);
+  const user = rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+  return user ? sanitizeCredentialFields(user) : null;
+}
+
+async function updateLegacyPassword(userId, newPassword) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  await supabaseRequest("usuarios", {
+    method: "PATCH",
+    query: supabaseAnd(supabaseEq("id", userId), "auth_user_id=is.null"),
+    body: { senha: newPassword },
+    prefer: "return=minimal",
+    queueOffline: false
+  });
+}
+
+async function updateUserFields(userId, fields) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  const compatibleFields = USER_PROFILE_ADDRESS_FIELDS_ENABLED
+    ? fields
+    : Object.fromEntries(Object.entries(fields).filter(([field]) => !USER_PROFILE_ADDRESS_FIELDS.includes(field)));
+  await supabaseRequest("usuarios", {
+    method: "PATCH",
+    query: supabaseEq("id", userId),
+    body: compatibleFields,
+    prefer: "return=minimal",
+    queueOffline: false
+  });
+}
+
+async function deleteUserById(userId) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  await supabaseRequest("usuarios", {
+    method: "DELETE",
+    query: supabaseEq("id", userId),
+    prefer: "return=minimal",
+    queueOffline: false
+  });
+}
+
+async function authenticateAuthUser(resolvedUser, password) {
+  if (!AUTH_DUAL_LOGIN_ENABLED || !supabaseAuthClient) throw new Error("AUTH_FLOW_DISABLED");
+  if (!resolvedUser?.authUserId || !resolvedUser.email) throw new Error("AUTH_PROFILE_INVALID");
+  const { data, error } = await supabaseAuthClient.auth.signInWithPassword({ email: resolvedUser.email, password });
+  if (error || !data?.session || data.user?.id !== resolvedUser.authUserId) {
+    if (data?.session) await supabaseAuthClient.auth.signOut();
+    throw new Error("AUTH_LOGIN_FAILED");
+  }
+  sessionMode = AUTH_SESSION_MODE;
+  sessionAuthUserId = data.user.id;
+  const confirmedUser = await loadUserByAuthId(data.user.id);
+  if (!confirmedUser || confirmedUser.id !== resolvedUser.id || confirmedUser.authUserId !== data.user.id) {
+    await supabaseAuthClient.auth.signOut();
+    clearSession();
+    throw new Error("AUTH_PROFILE_MISMATCH");
+  }
+  return confirmedUser;
+}
+
+function selectWithFilter(filter = "") {
+  return filter ? `select=*&${filter}` : "select=*";
 }
 
 function logSupabaseLoad(user, data) {
@@ -454,7 +773,6 @@ function saveDatabase() {
 async function persistDatabase() {
   if (!SUPABASE_READY) throw new Error("Supabase não configurado.");
   const payload = toSupabaseRows(db);
-  await upsertRows("usuarios", payload.usuarios);
   await Promise.all([
     upsertRows("categorias", payload.categorias),
     upsertRows("tipos_conta", payload.tiposConta, "usuario_id,nome"),
@@ -514,36 +832,103 @@ async function supabaseSelect(table, query = "select=*") {
   return supabaseRequest(table, { method: "GET", query });
 }
 
-async function supabaseRequest(table, { method = "GET", query = "", body = null, prefer = "return=representation" } = {}) {
+async function supabaseRequestHeaders(prefer = "return=representation") {
+  let authorization = SUPABASE_CONFIG.anonKey;
+  if (sessionMode === AUTH_SESSION_MODE) {
+    if (!AUTH_DUAL_LOGIN_ENABLED || !supabaseAuthClient || !sessionAuthUserId) throw new Error("AUTH_SESSION_REQUIRED");
+    const { data, error } = await supabaseAuthClient.auth.getSession();
+    if (error || !data?.session || data.session.user?.id !== sessionAuthUserId) throw new Error("AUTH_SESSION_INVALID");
+    authorization = data.session.access_token;
+  }
+  return {
+    apikey: SUPABASE_CONFIG.anonKey,
+    Authorization: `Bearer ${authorization}`,
+    "Content-Type": "application/json",
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+    Prefer: prefer
+  };
+}
+
+class RestRequestTimeoutError extends Error {
+  constructor(method, resource, durationMs) {
+    super("A requisição REST excedeu o tempo limite.");
+    this.name = "RestRequestTimeoutError";
+    this.code = "REST_REQUEST_TIMEOUT";
+    this.method = method;
+    this.resource = resource;
+    this.durationMs = durationMs;
+  }
+}
+
+function isRestRequestTimeoutError(error) {
+  return error?.code === "REST_REQUEST_TIMEOUT" || error?.name === "RestRequestTimeoutError";
+}
+
+function isRemoteWriteOutcomeUncertain(error) {
+  return isRestRequestTimeoutError(error)
+    || error?.code === "CREDENTIAL_OPERATION_REQUIRES_ONLINE"
+    || isNetworkError(error)
+    || !error?.status;
+}
+
+async function supabaseRestFetch(resource, { method = "GET", query = "", headers, body = null } = {}) {
+  const separator = query ? `?${query}` : "";
+  const diagnosticMethod = String(method || "GET").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12) || "GET";
+  const diagnosticResource = String(resource || "unknown").replace(/[^a-z0-9_]/gi, "").slice(0, 50) || "unknown";
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REST_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${resource}${separator}`, {
+      method,
+      cache: "no-store",
+      headers,
+      body,
+      signal: controller.signal
+    });
+    const responseText = response.status === 204 ? "" : await response.text();
+    return { response, responseText };
+  } catch (error) {
+    if (timedOut) {
+      const durationMs = Date.now() - startedAt;
+      console.warn(`[MEU BOLSO][REST TIMEOUT] ${diagnosticMethod} ${diagnosticResource} ${durationMs}ms`);
+      throw new RestRequestTimeoutError(diagnosticMethod, diagnosticResource, durationMs);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function supabaseRequest(table, { method = "GET", query = "", body = null, prefer = "return=representation", queueOffline = true } = {}) {
   if (method !== "GET" && !navigator.onLine) {
+    if (!queueOffline) throw onlineCredentialOperationError();
     queueSupabaseOperation({ table, method, query, body, prefer });
     return [];
   }
-  const separator = query ? `?${query}` : "";
   let response;
+  let responseText;
   try {
-    response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${table}${separator}`, {
+    ({ response, responseText } = await supabaseRestFetch(table, {
       method,
-      cache: "no-store",
-      headers: {
-        apikey: SUPABASE_CONFIG.anonKey,
-        Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
-        "Content-Type": "application/json",
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-        Prefer: prefer
-      },
+      query,
+      headers: await supabaseRequestHeaders(prefer),
       body: body ? JSON.stringify(body) : null
-    });
+    }));
   } catch (error) {
     if (method !== "GET" && isNetworkError(error)) {
+      if (!queueOffline) throw onlineCredentialOperationError();
       queueSupabaseOperation({ table, method, query, body, prefer });
       return [];
     }
     throw error;
   }
   if (!response.ok) {
-    const responseText = await response.text();
     let payload = null;
     try { payload = responseText ? JSON.parse(responseText) : null; } catch {}
     const requestError = new Error(payload?.message || responseText || `Erro Supabase: ${response.status}`);
@@ -564,45 +949,41 @@ async function supabaseRequest(table, { method = "GET", query = "", body = null,
     throw requestError;
   }
   if (response.status === 204) return [];
-  const text = await response.text();
-  return text ? JSON.parse(text) : [];
+  return responseText ? JSON.parse(responseText) : [];
 }
 
 async function syncOfflineQueue() {
-  if (isSyncingOfflineQueue || !navigator.onLine || !SUPABASE_READY || !hasOfflineQueue()) return;
+  if (isSyncingOfflineQueue || !navigator.onLine || !SUPABASE_READY || !hasOfflineQueue() || !session) return;
   isSyncingOfflineQueue = true;
   const queue = offlineQueue().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  const remaining = [];
+  const ownedQueue = queue.filter(operationBelongsToCurrentContext);
+  const remaining = queue.filter(operation => !operationBelongsToCurrentContext(operation));
+  if (!ownedQueue.length) {
+    isSyncingOfflineQueue = false;
+    return;
+  }
   try {
-    for (const operation of queue) {
-      const separator = operation.query ? `?${operation.query}` : "";
-      const response = await fetch(`${SUPABASE_CONFIG.url}/rest/v1/${operation.table}${separator}`, {
+    for (const operation of ownedQueue) {
+      const { response, responseText } = await supabaseRestFetch(operation.table, {
         method: operation.method,
-        cache: "no-store",
-        headers: {
-          apikey: SUPABASE_CONFIG.anonKey,
-          Authorization: `Bearer ${SUPABASE_CONFIG.anonKey}`,
-          "Content-Type": "application/json",
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-          Prefer: operation.prefer || "return=minimal"
-        },
+        query: operation.query || "",
+        headers: await supabaseRequestHeaders(operation.prefer || "return=minimal"),
         body: operation.body ? JSON.stringify(operation.body) : null
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(responseText);
     }
-    saveOfflineQueue([]);
+    saveOfflineQueue(remaining);
     isOfflineMode = false;
     logActivity("Sincronizou alterações offline.");
     if (session) {
-      if (isMaster()) await refreshMasterData();
+      if (viewMode === MASTER_VIEW_MODE) await refreshMasterData();
       else await refreshUserFinancialData();
       render();
     }
     showToast("Dados sincronizados com sucesso.");
   } catch (error) {
     console.error("[MEU BOLSO][Offline] erro ao sincronizar fila", error);
-    remaining.push(...queue);
+    remaining.push(...ownedQueue);
     saveOfflineQueue(remaining);
     isOfflineMode = true;
     showToast("Não foi possível sincronizar agora. Tentaremos novamente em breve.");
@@ -618,7 +999,7 @@ function fromSupabaseRows(rows) {
       id: row.id,
       name: row.nome,
       username: row.usuario,
-      password: row.senha,
+      authUserId: row.auth_user_id || null,
       role: row.perfil === "master" ? "master" : "user",
       whatsapp: row.whatsapp || "",
       email: row.email || "",
@@ -655,6 +1036,8 @@ function fromSupabaseRows(rows) {
   rows.despesas.forEach(row => pushForUser(data.transactions, row.usuario_id, {
     id: row.id,
     source: row.origem === "card-installment" ? "card-installment" : undefined,
+    recurrenceId: monthlyExpenseRecurrenceIdFromOrigin(row.origem) || undefined,
+    recurrenceEnded: monthlyExpenseEndedFromOrigin(row.origem),
     sourcePurchaseId: row.compra_cartao_id || undefined,
     sourceInstallmentId: row.parcela_id || undefined,
     name: row.nome,
@@ -757,22 +1140,6 @@ function fromSupabaseRows(rows) {
 }
 
 function toSupabaseRows(data) {
-  const usuarios = data.users.map(user => ({
-    id: user.id,
-    nome: user.name,
-    usuario: user.username,
-    senha: user.password,
-    whatsapp: user.whatsapp || "",
-    email: user.email || "",
-    endereco: user.address || "",
-    cidade: user.city || "",
-    estado: user.state || "",
-    data_cadastro: user.createdAt || dateOffset(),
-    data_vencimento: user.role === "user" ? user.accessExpiresAt || futureDate(30) : user.accessExpiresAt || futureDate(365),
-    status: user.role === "master" ? "ativo" : user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : daysUntilExpiry(user) <= 7 ? "vencendo" : "ativo",
-    perfil: user.role === "master" ? "master" : "usuario",
-    valor_renovacao: Number(user.renewalPrice || 49.9)
-  }));
   const receitas = [];
   const despesas = [];
   Object.entries(data.transactions || {}).forEach(([userId, items]) => {
@@ -806,7 +1173,7 @@ function toSupabaseRows(data) {
           forma_pagamento: item.paymentMethod || null,
           data_pagamento: item.paidDate || null,
           hora_pagamento: item.paidTime || null,
-          origem: item.source || "manual",
+          origem: monthlyExpenseOrigin(item),
           compra_cartao_id: item.sourcePurchaseId || null,
           parcela_id: item.sourceInstallmentId || null
         });
@@ -859,7 +1226,6 @@ function toSupabaseRows(data) {
     });
   });
   return {
-    usuarios,
     receitas,
     despesas,
     cartoes,
@@ -891,23 +1257,33 @@ function toSupabaseRows(data) {
   };
 }
 
-async function saveNewUserToSupabase(user) {
-  await upsertRows("usuarios", [{
-    id: user.id,
-    nome: user.name,
-    usuario: user.username,
-    senha: user.password,
-    whatsapp: user.whatsapp || "",
-    email: user.email || "",
-    endereco: user.address || "",
-    cidade: user.city || "",
-    estado: user.state || "",
-    data_cadastro: user.createdAt || dateOffset(),
-    data_vencimento: user.accessExpiresAt || futureDate(30),
+async function saveNewUserToSupabase(publicUser, legacyPassword) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  const userRow = {
+    id: publicUser.id,
+    nome: publicUser.name,
+    usuario: publicUser.username,
+    senha: legacyPassword,
+    whatsapp: publicUser.whatsapp || "",
+    email: publicUser.email || "",
+    data_cadastro: publicUser.createdAt || dateOffset(),
+    data_vencimento: publicUser.accessExpiresAt || futureDate(30),
     status: "ativo",
     perfil: "usuario",
-    valor_renovacao: Number(user.renewalPrice || 49.9)
-  }]);
+    auth_user_id: null,
+    valor_renovacao: Number(publicUser.renewalPrice || 49.9)
+  };
+  if (USER_PROFILE_ADDRESS_FIELDS_ENABLED) {
+    userRow.endereco = publicUser.address || "";
+    userRow.cidade = publicUser.city || "";
+    userRow.estado = publicUser.state || "";
+  }
+  await supabaseRequest("usuarios", {
+    method: "POST",
+    body: [userRow],
+    prefer: "resolution=merge-duplicates,return=minimal",
+    queueOffline: false
+  });
 }
 
 function transactionToSupabaseRow(item, userId = session) {
@@ -940,10 +1316,35 @@ function transactionToSupabaseRow(item, userId = session) {
     forma_pagamento: item.paymentMethod || null,
     data_pagamento: item.paidDate || null,
     hora_pagamento: item.paidTime || null,
-    origem: item.source || "manual",
+    origem: monthlyExpenseOrigin(item),
     compra_cartao_id: item.sourcePurchaseId || null,
     parcela_id: item.sourceInstallmentId || null
   };
+}
+
+const MONTHLY_EXPENSE_SOURCE_PREFIX = "manual-recurring:";
+const MONTHLY_EXPENSE_ENDED_SOURCE_PREFIX = "manual-recurring-ended:";
+
+function monthlyExpenseRecurrenceIdFromOrigin(origin) {
+  const value = String(origin || "");
+  if (value.startsWith(MONTHLY_EXPENSE_ENDED_SOURCE_PREFIX)) return value.slice(MONTHLY_EXPENSE_ENDED_SOURCE_PREFIX.length);
+  if (value.startsWith(MONTHLY_EXPENSE_SOURCE_PREFIX)) return value.slice(MONTHLY_EXPENSE_SOURCE_PREFIX.length);
+  return "";
+}
+
+function monthlyExpenseEndedFromOrigin(origin) {
+  return String(origin || "").startsWith(MONTHLY_EXPENSE_ENDED_SOURCE_PREFIX);
+}
+
+function isMonthlyExpenseClosure(item) {
+  return item?.type === "expense" && item.recurrenceEnded === true && Boolean(item.recurrenceId);
+}
+
+function monthlyExpenseOrigin(item) {
+  if (item.source === "card-installment" || item.source === "card-installment-virtual") return item.source;
+  const recurrenceId = String(item.recurrenceId || "").trim();
+  if (recurrenceId && item.recurrenceEnded) return `${MONTHLY_EXPENSE_ENDED_SOURCE_PREFIX}${recurrenceId}`;
+  return recurrenceId ? `${MONTHLY_EXPENSE_SOURCE_PREFIX}${recurrenceId}` : (item.source || "manual");
 }
 
 function monthlyExpenseSeriesKey(item) {
@@ -953,6 +1354,25 @@ function monthlyExpenseSeriesKey(item) {
     String(item.category || "Outros").trim().toLocaleLowerCase("pt-BR"),
     String(item.account || "Conta corrente").trim().toLocaleLowerCase("pt-BR")
   ].join("|");
+}
+
+function monthlyExpenseSeriesToken(item) {
+  return String(item.recurrenceId || "").trim() || `legacy-${stableHashHex(monthlyExpenseSeriesKey(item), 24)}`;
+}
+
+function monthlyExpenseOccurrenceId(seriesToken, targetMonth) {
+  const compact = stableHashHex(`expense|${seriesToken}|${targetMonth}`, 32).split("");
+  compact[12] = "5";
+  compact[16] = "b";
+  const value = compact.join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+function monthlyExpenseDateForMonth(dueDate, targetMonth) {
+  const [year, month] = targetMonth.split("-").map(Number);
+  const preferredDay = Math.max(Number(String(dueDate || "").slice(8, 10) || 1), 1);
+  const dueDay = Math.min(preferredDay, daysInMonth(year, month - 1));
+  return `${targetMonth}-${String(dueDay).padStart(2, "0")}`;
 }
 
 async function ensureMonthlyOccurrences(userId = session, targetDate = dateOffset()) {
@@ -1056,20 +1476,13 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
   return created;
 }
 
-function monthlyExpenseDueDate(items, targetMonth) {
-  const [year, month] = targetMonth.split("-").map(Number);
-  const preferredDay = Math.max(...items.map(item => Number(item.dueDate?.slice(8, 10) || 1)), 1);
-  const dueDay = Math.min(preferredDay, daysInMonth(year, month - 1));
-  return `${targetMonth}-${String(dueDay).padStart(2, "0")}`;
-}
-
 async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = dateOffset()) {
   if (!userId) return [];
   db.transactions[userId] ||= [];
   const targetMonth = targetDate.slice(0, 7);
   const monthlyExpenses = db.transactions[userId].filter(item =>
     item.type === "expense" &&
-    item.repeat === "fixed" &&
+    (item.repeat === "fixed" || item.recurrenceId) &&
     item.source !== "card-installment" &&
     item.source !== "card-installment-virtual" &&
     item.dueDate &&
@@ -1077,18 +1490,21 @@ async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = da
   );
   const series = new Map();
   monthlyExpenses.forEach(item => {
-    const key = monthlyExpenseSeriesKey(item);
-    series.set(key, [...(series.get(key) || []), item]);
+    const token = monthlyExpenseSeriesToken(item);
+    series.set(token, [...(series.get(token) || []), item]);
   });
   const created = [];
-  series.forEach(items => {
+  series.forEach((items, token) => {
     if (items.some(item => item.dueDate.slice(0, 7) === targetMonth)) return;
     const source = [...items].sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
-    if (!source || source.dueDate.slice(0, 7) >= targetMonth) return;
+    if (!source || source.repeat !== "fixed" || source.dueDate.slice(0, 7) >= targetMonth) return;
+    const id = monthlyExpenseOccurrenceId(token, targetMonth);
+    if (db.transactions[userId].some(item => item.id === id)) return;
     created.push({
       ...source,
-      id: crypto.randomUUID(),
-      dueDate: monthlyExpenseDueDate(items, targetMonth),
+      id,
+      recurrenceId: token,
+      dueDate: monthlyExpenseDateForMonth(source.dueDate, targetMonth),
       status: "pending",
       paymentMethod: "",
       paidDate: "",
@@ -1099,7 +1515,14 @@ async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = da
   if (!created.length) return [];
   db.transactions[userId].unshift(...created);
   cacheDatabase();
-  await upsertRows("despesas", created.map(item => transactionToSupabaseRow(item, userId)));
+  try {
+    await upsertRows("despesas", created.map(item => transactionToSupabaseRow(item, userId)));
+  } catch (error) {
+    const createdIds = new Set(created.map(item => item.id));
+    db.transactions[userId] = db.transactions[userId].filter(item => !createdIds.has(item.id));
+    cacheDatabase();
+    throw error;
+  }
   created.forEach(item => logActivity(`Gerou despesa mensal ${item.name} para ${targetMonth}.`, userId));
   return created;
 }
@@ -1109,6 +1532,80 @@ async function saveTransactionToSupabase(item, previousType = item.type) {
     await deleteRowById(previousType === "income" ? "receitas" : "despesas", item.id);
   }
   await upsertRows(item.type === "income" ? "receitas" : "despesas", [transactionToSupabaseRow(item)]);
+}
+
+async function saveMonthlyExpenseSeriesToSupabase(items) {
+  await upsertRows("despesas", items.map(item => transactionToSupabaseRow(item)));
+}
+
+function monthlyExpenseEditPlan(items, transactionId, values) {
+  const existing = items.find(item => item.id === transactionId);
+  if (!existing || existing.type !== "expense" || values.type !== "expense" || existing.repeat !== "fixed") return null;
+  const seriesToken = monthlyExpenseSeriesToken(existing);
+  const startingMonth = String(existing.dueDate || "").slice(0, 7);
+  const changes = items
+    .filter(item =>
+      item.type === "expense" &&
+      item.source !== "card-installment" &&
+      item.source !== "card-installment-virtual" &&
+      item.dueDate &&
+      item.dueDate.slice(0, 7) >= startingMonth &&
+      monthlyExpenseSeriesToken(item) === seriesToken
+    )
+    .map(item => {
+      const isSelected = item.id === transactionId;
+      const sharedValues = {
+        name: values.name,
+        amount: values.amount,
+        repeat: values.repeat,
+        category: values.category,
+        account: values.account,
+        recurrenceId: seriesToken,
+        dueDate: monthlyExpenseDateForMonth(values.dueDate, item.dueDate.slice(0, 7))
+      };
+      return {
+        previous: item,
+        next: isSelected ? { ...item, ...values, ...sharedValues } : { ...item, ...sharedValues }
+      };
+    });
+  return { seriesToken, changes };
+}
+
+function monthlyExpenseDeletePlan(items, transactionId) {
+  const existing = items.find(item => item.id === transactionId);
+  if (
+    !existing ||
+    existing.type !== "expense" ||
+    existing.source === "card-installment" ||
+    existing.source === "card-installment-virtual" ||
+    (existing.repeat !== "fixed" && !existing.recurrenceId)
+  ) return null;
+  const seriesToken = monthlyExpenseSeriesToken(existing);
+  const startingMonth = String(existing.dueDate || "").slice(0, 7);
+  const changes = items
+    .filter(item =>
+      item.type === "expense" &&
+      item.source !== "card-installment" &&
+      item.source !== "card-installment-virtual" &&
+      item.dueDate &&
+      item.dueDate.slice(0, 7) >= startingMonth &&
+      monthlyExpenseSeriesToken(item) === seriesToken
+    )
+    .map(item => ({
+      previous: item,
+      next: {
+        ...item,
+        amount: 0,
+        repeat: "none",
+        status: "pending",
+        paymentMethod: "",
+        paidDate: "",
+        paidTime: "",
+        recurrenceId: seriesToken,
+        recurrenceEnded: true
+      }
+    }));
+  return { seriesToken, startingMonth, changes };
 }
 
 function cardToSupabaseRow(card, userId = session) {
@@ -1222,8 +1719,81 @@ function currentUser() {
   return db.users.find(user => user.id === session);
 }
 
-function isMaster() {
+function hasMasterRole() {
   return currentUser()?.role === "master";
+}
+
+function isMasterView() {
+  return hasMasterRole() && viewMode === MASTER_VIEW_MODE;
+}
+
+function isUserView() {
+  return viewMode === USER_VIEW_MODE;
+}
+
+function canUseMasterContext() {
+  return hasMasterRole() && isMasterView();
+}
+
+// Compatibilidade interna: neste arquivo "isMaster" representa o contexto visual,
+// nunca apenas o papel persistido do usuário.
+function isMaster() {
+  return isMasterView();
+}
+
+function resetViewTransientState() {
+  currentView = "home";
+  dashboardDetail = null;
+  profileDashboardDetailType = null;
+  editingTransactionId = null;
+  editingCardId = null;
+  editingPurchaseId = null;
+  selectedPurchaseId = null;
+  selectedCardId = null;
+  purchaseFormOpen = false;
+  userFormOpen = false;
+  userFiltersOpen = false;
+  editingUserId = null;
+  reportUserId = "all";
+  homeOverviewTab = "summary";
+}
+
+async function switchViewMode(targetViewMode) {
+  if (![MASTER_VIEW_MODE, USER_VIEW_MODE].includes(targetViewMode) || targetViewMode === viewMode) return;
+  if (!hasMasterRole()) return showToast("Acesso não autorizado.");
+  if (hasPendingQueueForCurrentContext() && navigator.onLine) await syncOfflineQueue();
+  if (hasPendingQueueForCurrentContext()) return showToast("Sincronize as alterações pendentes antes de trocar de contexto.");
+  if (!navigator.onLine) return showToast("Conecte-se à internet para trocar de contexto.");
+
+  const previousViewMode = viewMode;
+  const previousDatabase = db;
+  invalidateDatabaseLoads();
+  isBooting = true;
+  render();
+  try {
+    const verifiedUser = await loadUserById(session);
+    if (!verifiedUser || verifiedUser.role !== "master") throw new Error("Papel Master Global não confirmado.");
+    viewMode = targetViewMode;
+    invalidateDatabaseLoads();
+    const targetGeneration = databaseLoadGeneration;
+    localStorage.removeItem(LOCAL_DB_KEY);
+    if (targetViewMode === MASTER_VIEW_MODE) await loadMasterDatabase(verifiedUser);
+    else await loadPersonalDatabase(verifiedUser);
+    if (session !== verifiedUser.id || viewMode !== targetViewMode || databaseLoadGeneration !== targetGeneration || currentUser()?.id !== verifiedUser.id) return;
+    saveSession(verifiedUser, { mode: sessionMode, authUserId: sessionAuthUserId, requestedViewMode: targetViewMode });
+    resetViewTransientState();
+    showToast("Perfil alterado com sucesso.");
+  } catch (error) {
+    viewMode = previousViewMode;
+    db = previousDatabase;
+    invalidateDatabaseLoads();
+    cacheDatabase();
+    showToast("Não foi possível trocar de contexto.");
+    console.error("[MEU BOLSO][Contexto] troca não concluída", error?.message || error);
+  } finally {
+    isBooting = false;
+    render();
+  }
 }
 
 function regularUsers() {
@@ -1236,6 +1806,12 @@ function isExpired(user) {
 
 function isAccessBlocked(user) {
   return user.role === "user" && (user.blocked || isExpired(user));
+}
+
+function accessRestrictionMessage(user) {
+  if (user?.blocked) return "Seu acesso está bloqueado. Entre em contato com o administrador.";
+  if (isExpired(user)) return "Seu acesso expirou. Entre em contato com o administrador.";
+  return "Acesso não autorizado.";
 }
 
 function daysUntilExpiry(user) {
@@ -1253,11 +1829,11 @@ function accessStatus(user) {
 
 function transactionsFor(userId) {
   if (isMaster()) {
-    if (userId === "all") return regularUsers().flatMap(user => (db.transactions[user.id] || []).map(item => ({ ...item, ownerId: user.id, ownerName: user.name })));
+    if (userId === "all") return regularUsers().flatMap(user => (db.transactions[user.id] || []).filter(item => !isMonthlyExpenseClosure(item)).map(item => ({ ...item, ownerId: user.id, ownerName: user.name })));
     if (!regularUsers().some(user => user.id === userId)) return [];
-    return (db.transactions[userId] || []).map(item => ({ ...item, ownerId: userId, ownerName: db.users.find(user => user.id === userId)?.name }));
+    return (db.transactions[userId] || []).filter(item => !isMonthlyExpenseClosure(item)).map(item => ({ ...item, ownerId: userId, ownerName: db.users.find(user => user.id === userId)?.name }));
   }
-  return db.transactions[session] || [];
+  return (db.transactions[session] || []).filter(item => !isMonthlyExpenseClosure(item));
 }
 
 function userTransactions() {
@@ -1400,13 +1976,152 @@ function cardInstallmentItems(userId = session) {
   });
 }
 
+function cardInvoiceTargetMonth(cardId) {
+  return cardId ? monthKey(invoiceClosingDate(cardId)) : monthKey();
+}
+
+function cardInvoiceItems(cardId = null, targetMonth = null, userId = session) {
+  const resolvedTargetMonth = targetMonth || cardInvoiceTargetMonth(cardId);
+  const purchasesById = new Map(userCardPurchases(userId).map(purchase => [purchase.id, purchase]));
+  return cardInstallmentItems(userId)
+    .map(item => {
+      const purchase = purchasesById.get(item.sourcePurchaseId);
+      if (!purchase || (cardId && purchase.cardId !== cardId)) return null;
+      const paid = isPaidStatus(item);
+      if (dueMonthKey(item) !== resolvedTargetMonth) return null;
+      return {
+        ...item,
+        purchase,
+        key: item.sourceInstallment,
+        number: Number(item.sourceInstallment.split("-").pop()) || 1,
+        total: purchase.installments,
+        value: Number(item.amount || 0),
+        paid,
+        overdue: item.dueDate < dateOffset(),
+        competence: dueMonthKey(item),
+        payment: purchase.installmentPayments?.[item.sourceInstallment] || {}
+      };
+    })
+    .filter(Boolean);
+}
+
+function cardPendingInvoiceItems(cardId = null, targetMonth = null, userId = session) {
+  return cardInvoiceItems(cardId, targetMonth, userId).filter(item => !item.paid);
+}
+
+function cardInvoiceCycleDates(card, competence) {
+  const [year, monthNumber] = String(competence || "").split("-").map(Number);
+  if (!year || !monthNumber) return { closingDate: "", dueDate: "" };
+  const closingDay = Math.min(Number(card?.closingDay || 1), daysInMonth(year, monthNumber - 1));
+  const closing = new Date(year, monthNumber - 1, closingDay, 12);
+  const dueMonthOffset = Number(card?.dueDay || 1) < Number(card?.closingDay || 1) ? 1 : 0;
+  const dueMonth = new Date(year, monthNumber - 1 + dueMonthOffset, 1, 12);
+  const dueDay = Math.min(Number(card?.dueDay || 1), daysInMonth(dueMonth.getFullYear(), dueMonth.getMonth()));
+  const due = new Date(dueMonth.getFullYear(), dueMonth.getMonth(), dueDay, 12);
+  return { closingDate: localDateKey(closing), dueDate: localDateKey(due) };
+}
+
+function cardInvoiceNotificationStates(today = dateOffset()) {
+  return userCards().flatMap(card => {
+    const purchases = userCardPurchases().filter(purchase => purchase.cardId === card.id);
+    const competences = new Set([cardInvoiceTargetMonth(card.id)]);
+    purchases.forEach(purchase => {
+      for (let installmentNumber = 1; installmentNumber <= purchase.installments; installmentNumber += 1) {
+        competences.add(monthKey(installmentDueDate(purchase, installmentNumber)));
+      }
+    });
+    return [...competences].sort().map(competence => {
+      const items = cardPendingInvoiceItems(card.id, competence);
+      const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const { closingDate, dueDate } = cardInvoiceCycleDates(card, competence);
+      if (!items.length || total <= 0 || !closingDate || today < closingDate) return null;
+      return { card, competence, items, total, closingDate, dueDate };
+    }).filter(Boolean);
+  });
+}
+
+function cardCurrentInvoiceCycleDates(card, today = dateOffset()) {
+  const current = new Date(`${today}T12:00:00`);
+  const closingDay = Number(card?.closingDay || 1);
+  const dueDay = Number(card?.dueDay || 1);
+  const closingMonthOffset = closingDay > dueDay ? -1 : 0;
+  const closingMonth = new Date(current.getFullYear(), current.getMonth() + closingMonthOffset, 1, 12);
+  const closingDate = new Date(
+    closingMonth.getFullYear(),
+    closingMonth.getMonth(),
+    Math.min(closingDay, daysInMonth(closingMonth.getFullYear(), closingMonth.getMonth())),
+    12
+  );
+  const dueDate = new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    Math.min(dueDay, daysInMonth(current.getFullYear(), current.getMonth())),
+    12
+  );
+  return { closingDate: localDateKey(closingDate), dueDate: localDateKey(dueDate) };
+}
+
+function cardCurrentInvoiceNotificationStates(today = dateOffset()) {
+  return userCards().map(card => {
+    const competence = cardInvoiceTargetMonth(card.id);
+    const items = cardPendingInvoiceItems(card.id, competence);
+    const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const { closingDate, dueDate } = cardCurrentInvoiceCycleDates(card, today);
+    if (!items.length || total <= 0 || today < closingDate) return null;
+    return { card, competence, items, total, closingDate, dueDate };
+  }).filter(Boolean);
+}
+
+function cardInvoiceNotificationSources(today = dateOffset()) {
+  return cardCurrentInvoiceNotificationStates(today).map(invoice => {
+    const dueToday = invoice.dueDate === today;
+    const overdue = invoice.dueDate < today;
+    return {
+      id: `invoice:${invoice.card.id}:${invoice.competence}`,
+      title: overdue ? "Fatura vencida" : dueToday ? "Fatura vence hoje" : "Fatura fechada",
+      message: overdue
+        ? `A fatura do cartão ${invoice.card.name} está vencida.`
+        : dueToday
+          ? `A fatura do cartão ${invoice.card.name} vence hoje.`
+          : `A fatura do cartão ${invoice.card.name} fechou. Vencimento em ${formatDate(invoice.dueDate, true)}.`,
+      date: invoice.dueDate,
+      time: "08:00",
+      amount: invoice.total,
+      kind: "invoice",
+      cardId: invoice.card.id,
+      competence: invoice.competence,
+      priority: overdue ? 25 : dueToday ? 40 : 50
+    };
+  });
+}
+
+function cardInvoicePushCandidates(today = dateOffset()) {
+  return cardInvoiceNotificationStates(today).flatMap(invoice => {
+    if (today === invoice.closingDate) {
+      return [{
+        key: `card:${invoice.card.id}:${invoice.competence}:closing`,
+        body: `Fatura ${invoice.card.name} fechou. Vencimento em ${formatDate(invoice.dueDate, true)}. Total pendente: ${money(invoice.total)}.`,
+        url: "/?view=card"
+      }];
+    }
+    if (today === invoice.dueDate) {
+      return [{
+        key: `card:${invoice.card.id}:${invoice.competence}:due`,
+        body: `Fatura ${invoice.card.name} vence hoje. Total pendente: ${money(invoice.total)}.`,
+        url: "/?view=card"
+      }];
+    }
+    return [];
+  });
+}
+
 function dashboardTransactions() {
   const baseItems = userTransactions().filter(item => item.source !== "card-installment");
   return [...baseItems, ...cardInstallmentItems()];
 }
 
 function financialItemsForUser(userId) {
-  const baseItems = (db.transactions[userId] || []).filter(item => item.source !== "card-installment");
+  const baseItems = (db.transactions[userId] || []).filter(item => item.source !== "card-installment" && !isMonthlyExpenseClosure(item));
   return [...baseItems, ...cardInstallmentItems(userId)];
 }
 
@@ -1467,6 +2182,16 @@ function render() {
   }
   const user = currentUser();
   if (!user) {
+    if (session && hasActiveDatabaseLoadForCurrentContext()) {
+      app.innerHTML = `
+        <section class="login-page">
+          <form class="login-card">
+            <h2>Sincronizando informações</h2>
+            <p>Atualizando seus dados com segurança...</p>
+          </form>
+        </section>`;
+      return;
+    }
     clearSession();
     app.innerHTML = authView === "register" ? registerTemplate() : loginTemplate();
     bindLogin();
@@ -1538,6 +2263,7 @@ function registerTemplate() {
 function shellTemplate() {
   const user = currentUser();
   const activeNotifications = notificationCenterItems().length;
+  const masterContext = isMasterView();
   return `
     <section class="app-shell">
       ${currentView === "home" ? `<header class="topbar">
@@ -1550,12 +2276,12 @@ function shellTemplate() {
       </header>` : ""}
       ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
-      ${user.role === "user" ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
-      <nav class="bottom-nav ${user.role === "master" ? "master-nav" : "user-nav"}">
+      ${!masterContext ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
+      <nav class="bottom-nav ${masterContext ? "master-nav" : "user-nav"}">
         ${navButton("home", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.8 12 3l9 7.8v9.7a.5.5 0 0 1-.5.5H15v-6H9v6H3.5a.5.5 0 0 1-.5-.5z"/></svg>`, "Início")}
-        ${user.role === "master" ? navButton("users", "♙", "Usuários") : navButton("transactions", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v15m0 0-4-4m4 4 4-4M17 21V6m0 0-4 4m4-4 4 4"/></svg>`, "Transações")}
-        ${user.role === "master" ? navButton("reports", "▤", "Relatórios") : navButton("card", `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3 9h18M7 15h4"/></svg>`, "Cartões")}
-        ${user.role === "master" ? navButton("support", "?", "Suporte") : ""}
+        ${masterContext ? navButton("users", "♙", "Usuários") : navButton("transactions", `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v15m0 0-4-4m4 4 4-4M17 21V6m0 0-4 4m4-4 4 4"/></svg>`, "Transações")}
+        ${masterContext ? navButton("reports", "▤", "Relatórios") : navButton("card", `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M3 9h18M7 15h4"/></svg>`, "Cartões")}
+        ${masterContext ? navButton("support", "?", "Suporte") : ""}
       </nav>
     </section>`;
 }
@@ -1774,44 +2500,7 @@ function notificationCenterSources() {
       };
     });
 
-  const installments = cardInstallmentItems()
-    .filter(item => !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
-    .map(item => {
-      const todayDue = item.dueDate === today;
-      return {
-        id: `installment:${item.sourcePurchaseId}:${item.sourceInstallment}`,
-        title: `Parcela de cartão ${todayDue ? "vence hoje" : "vencida"}`,
-        message: `${item.name} no cartão ${item.cardName || "Cartão"}.`,
-        date: item.dueDate,
-        time: "08:00",
-        amount: Number(item.amount || 0),
-        kind: "installment",
-        purchaseId: item.sourcePurchaseId,
-        installmentKey: item.sourceInstallment,
-        priority: todayDue ? 40 : 20
-      };
-    });
-
-  const now = new Date(`${today}T12:00:00`);
-  const invoices = userCards().flatMap(card => {
-    const due = new Date(now.getFullYear(), now.getMonth(), Math.min(Number(card.dueDay || 1), daysInMonth(now.getFullYear(), now.getMonth())), 12);
-    const dueDate = localDateKey(due);
-    const amount = currentInvoice(card.id);
-    if (!amount) return [];
-    const todayDue = dueDate === today;
-    const overdue = dueDate < today;
-    return [{
-      id: `invoice:${card.id}:${dueDate}`,
-      title: overdue ? "Fatura vencida" : todayDue ? "Fatura vence hoje" : "Fatura pendente",
-      message: `A fatura do cartão ${card.name} ${overdue ? "está vencida" : todayDue ? "vence hoje" : "está pendente"}.`,
-      date: dueDate,
-      time: "08:00",
-      amount: Number(amount || 0),
-      kind: "invoice",
-      cardId: card.id,
-      priority: overdue ? 25 : todayDue ? 40 : 50
-    }];
-  });
+  const invoices = cardInvoiceNotificationSources(today);
 
   const user = currentUser();
   const accessDays = user ? daysUntilExpiry(user) : 99;
@@ -1825,7 +2514,7 @@ function notificationCenterSources() {
     view: "profile",
     priority: 55
   }] : [];
-  return [...movements, ...invoices, ...installments, ...access, ...administrativeNotificationSources()];
+  return [...movements, ...invoices, ...access, ...administrativeNotificationSources()];
 }
 
 function administrativeNotificationSources() {
@@ -1881,7 +2570,7 @@ function notificationsTemplate() {
 
 function notificationCenterRow(item) {
   return `
-    <button class="notification-center-item" data-notification-id="${escapeAttribute(item.id)}" data-notification-kind="${escapeAttribute(item.kind || "")}" data-notification-record="${escapeAttribute(item.recordId || "")}" data-notification-card="${escapeAttribute(item.cardId || "")}" data-notification-purchase="${escapeAttribute(item.purchaseId || "")}" data-notification-installment="${escapeAttribute(item.installmentKey || "")}" data-notification-view="${escapeAttribute(item.view || "")}">
+    <button class="notification-center-item" data-notification-id="${escapeAttribute(item.id)}" data-notification-kind="${escapeAttribute(item.kind || "")}" data-notification-record="${escapeAttribute(item.recordId || "")}" data-notification-card="${escapeAttribute(item.cardId || "")}" data-notification-competence="${escapeAttribute(item.competence || "")}" data-notification-purchase="${escapeAttribute(item.purchaseId || "")}" data-notification-installment="${escapeAttribute(item.installmentKey || "")}" data-notification-view="${escapeAttribute(item.view || "")}">
       <span class="notification-copy"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><small><svg viewBox="0 0 18 18" aria-hidden="true"><rect x="3" y="4.5" width="12" height="10" rx="1.8"/><path d="M6 2.8v3M12 2.8v3M3 7.5h12"/></svg>${formatDate(item.date, true)} — ${escapeHtml(item.time)}</small></span>
       ${Number.isFinite(item.amount) ? `<b>${money(item.amount)}</b>` : ""}
       <i aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m7 4 6 6-6 6"/></svg></i>
@@ -1895,7 +2584,7 @@ async function openNotificationTarget(button) {
     return;
   }
   if (kind === "invoice" && button.dataset.notificationCard) {
-    await payCardInvoice(button.dataset.notificationCard, { fromNotification: true });
+    await payCardInvoice(button.dataset.notificationCard, { competence: button.dataset.notificationCompetence || null, fromNotification: true });
     return;
   }
   if (kind === "installment" && button.dataset.notificationPurchase && button.dataset.notificationInstallment) {
@@ -2241,16 +2930,14 @@ function payableExpenseCard(item, overdue) {
 
 function payablesCardGroups() {
   const groups = new Map();
-  const currentMonth = monthKey();
-  cardInstallmentItems()
-    .filter(item => !isPaidStatus(item) && dueMonthKey(item) === currentMonth)
+  userCards().flatMap(card => cardPendingInvoiceItems(card.id))
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
     .forEach(item => {
-      const purchase = userCardPurchases().find(entry => entry.id === item.sourcePurchaseId);
+      const purchase = item.purchase;
       const card = userCards().find(entry => entry.id === purchase?.cardId);
       if (!purchase || !card) return;
       const group = groups.get(card.id) || { card, items: [], total: 0 };
-      group.items.push({ ...item, purchase });
+      group.items.push(item);
       group.total += Number(item.amount || 0);
       groups.set(card.id, group);
     });
@@ -3329,36 +4016,16 @@ function cardPurchasesTemplate() {
   if (!selectedCardId && cards.length) selectedCardId = cards[0].id;
   if (selectedCardId && !cards.some(card => card.id === selectedCardId)) selectedCardId = cards[0]?.id || null;
   const selectedCard = cards.find(card => card.id === selectedCardId);
-  const purchasesById = new Map(userCardPurchases().map(purchase => [purchase.id, purchase]));
-  const selectedCardInstallments = cardInstallmentItems()
-    .map(item => {
-      const purchase = purchasesById.get(item.sourcePurchaseId);
-      if (!purchase || purchase.cardId !== selectedCardId) return null;
-      const payment = purchase.installmentPayments?.[item.sourceInstallment] || {};
-      return {
-        purchase,
-        key: item.sourceInstallment,
-        number: Number(item.sourceInstallment.split("-").pop()) || 1,
-        total: purchase.installments,
-        value: Number(item.amount || 0),
-        paid: isPaidStatus(item),
-        overdue: !isPaidStatus(item) && item.dueDate < dateOffset(),
-        competence: dueMonthKey(item),
-        payment
-      };
-    })
-    .filter(Boolean);
-  const expectedInvoiceMonth = monthKey(invoiceClosingDate(selectedCard?.id));
-  const availableInvoiceMonths = [...new Set(selectedCardInstallments.map(item => item.competence))]
-    .filter(competence => competence >= expectedInvoiceMonth)
-    .sort();
-  const currentInvoiceMonth = availableInvoiceMonths.includes(expectedInvoiceMonth)
-    ? expectedInvoiceMonth
-    : availableInvoiceMonths[0] || expectedInvoiceMonth;
-  const currentInvoiceItems = selectedCardInstallments
-    .filter(item => item.competence === currentInvoiceMonth)
+  const currentInvoiceMonth = selectedCard ? cardInvoiceTargetMonth(selectedCard.id) : monthKey();
+  const selectedInvoiceMonth = cardPurchaseFilter === "month" && /^\d{4}-\d{2}$/.test(cardPurchaseMonth)
+    ? cardPurchaseMonth
+    : currentInvoiceMonth;
+  const invoiceItems = cardInvoiceItems(selectedCardId, selectedInvoiceMonth)
     .sort((a, b) => a.purchase.name.localeCompare(b.purchase.name, "pt-BR"));
-  const invoiceTotal = currentInvoiceItems.reduce((sum, item) => sum + item.value, 0);
+  const visibleInvoiceItems = filterCardPurchaseItems(invoiceItems);
+  const invoiceTotal = invoiceItems
+    .filter(item => !item.paid)
+    .reduce((sum, item) => sum + item.value, 0);
   if (!selectedCard) return `<div class="page-title"><span class="eyebrow">Compras</span><h1>Nenhum cartão</h1><p>Cadastre um cartão para lançar compras.</p></div><button class="primary-button" data-view="card">Voltar para cartões</button>`;
   return `
     <section class="dashboard-detail-page receivables-page card-purchases-page">
@@ -3367,17 +4034,41 @@ function cardPurchasesTemplate() {
         <span><strong>Compras - ${escapeHtml(selectedCard.name)}</strong><small>Gerencie compras, parcelas e pagamentos deste cartão.</small></span>
       </button>
       <article class="card-purchases-hero">
-        <div><span>Fatura atual</span><h2>Compras - ${escapeHtml(selectedCard.name)}</h2></div>
-        <div class="card-purchases-total"><small>Total da fatura</small><strong>${money(invoiceTotal)}</strong></div>
+        <div><span>${selectedInvoiceMonth === currentInvoiceMonth ? "Fatura atual" : `Fatura ${escapeHtml(cardPurchaseMonthLabel(selectedInvoiceMonth))}`}</span><h2>Compras - ${escapeHtml(selectedCard.name)}</h2></div>
+        <div class="card-purchases-total"><small>Total pendente</small><strong>${money(invoiceTotal)}</strong></div>
       </article>
-      ${cardPurchaseSection("Fatura atual", currentInvoiceItems, selectedCard)}
+      ${cardPurchaseSection(selectedInvoiceMonth === currentInvoiceMonth ? "Fatura atual" : cardPurchaseMonthLabel(selectedInvoiceMonth), visibleInvoiceItems, selectedCard)}
     </section>`;
+}
+
+function cardPurchaseMonthLabel(value) {
+  const [year, month] = String(value || "").split("-");
+  return month && year ? `${month}/${year}` : "Fatura atual";
+}
+
+function filterCardPurchaseItems(items, filter = cardPurchaseFilter) {
+  return items.filter(item => {
+    if (filter === "paid") return allInstallmentsPaid(item.purchase);
+    if (filter === "month") return true;
+    return !allInstallmentsPaid(item.purchase);
+  });
+}
+
+function cardPurchaseFilterControls() {
+  return `<div class="card-purchase-filter-controls">
+    <select data-card-purchase-filter aria-label="Filtrar compras do cartão">
+      <option value="pending" ${cardPurchaseFilter === "pending" ? "selected" : ""}>Pendentes</option>
+      <option value="paid" ${cardPurchaseFilter === "paid" ? "selected" : ""}>Pagos</option>
+      <option value="month" ${cardPurchaseFilter === "month" ? "selected" : ""}>Filtrar por mês</option>
+    </select>
+    ${cardPurchaseFilter === "month" ? `<input type="month" data-card-purchase-month aria-label="Competência da fatura" value="${escapeAttribute(cardPurchaseMonth || cardInvoiceTargetMonth(selectedCardId))}"><button type="button" data-card-purchase-current>Atual</button>` : ""}
+  </div>`;
 }
 
 function cardPurchaseSection(title, installments, card) {
   return `
     <section class="card-purchase-section current">
-      <header><h3>${title}</h3><span>${installments.length}</span></header>
+      <header><h3>${escapeHtml(title)}</h3>${cardPurchaseFilterControls()}<span>${installments.length}</span></header>
       <div class="card-purchase-list">${installments.length
         ? installments.map(item => purchaseInstallmentCard(item, card)).join("")
         : `<div class="card-purchases-empty">Nenhuma compra na fatura atual.</div>`}
@@ -3477,11 +4168,10 @@ function installmentHistoryItem(purchase, installmentNumber) {
 function installmentHistoryCard(item) {
   const status = item.paid ? "Pago" : item.overdue ? "Atrasado" : "Pendente";
   const statusClass = item.paid ? "paid" : item.overdue ? "overdue" : "pending";
-  const canEditDate = canEditTestInstallmentDates() && !item.paid && item.id;
   const menu = item.id ? `
     <details class="receivable-options installment-history-options">
       <summary aria-label="Mais opções da parcela ${item.number}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary>
-      <div>${canEditDate ? `<button type="button" data-edit-installment-date="${escapeAttribute(item.purchase.id)}" data-installment-number="${item.number}" data-installment-id="${escapeAttribute(item.id)}">Editar data</button>` : ""}<button type="button" class="danger" data-delete-installment="${escapeAttribute(item.purchase.id)}" data-installment-number="${item.number}" data-installment-id="${escapeAttribute(item.id)}">Excluir parcela</button></div>
+      <div><button type="button" class="danger" data-delete-installment="${escapeAttribute(item.purchase.id)}" data-installment-number="${item.number}" data-installment-id="${escapeAttribute(item.id)}">Excluir parcela</button></div>
     </details>` : "";
   return `
     <article class="receivable-card installment-history-card ${statusClass}">
@@ -3514,6 +4204,7 @@ function purchaseFormTemplate(cards, currentPurchase = null) {
   const editing = currentPurchase || (editingPurchaseId ? userCardPurchases().find(purchase => purchase.id === editingPurchaseId) : null);
   const card = cards.find(item => item.id === (editing?.cardId || selectedCardId)) || cards[0];
   const installmentCount = Number(editing?.installments || 1);
+  const paidInstallmentCount = Math.min((editing?.paidInstallments || []).length, installmentCount);
   const availableLimit = availableCardLimit(card?.id);
   return `
     <form id="purchase-form">
@@ -3540,9 +4231,10 @@ function purchaseFormTemplate(cards, currentPurchase = null) {
         <div class="purchase-installment-fields" data-purchase-installment-fields ${installmentCount === 1 ? "hidden" : ""}>
           <label class="field"><span>Quantidade de parcelas</span><select name="installments"><option value="1" ${installmentCount === 1 ? "selected" : ""}>1x</option>${Array.from({ length: 11 }, (_, index) => `<option value="${index + 2}" ${installmentCount === index + 2 ? "selected" : ""}>${index + 2}x</option>`).join("")}</select></label>
           <div class="purchase-installment-value"><span>Valor da parcela</span><strong data-purchase-installment-value>${money(Number(editing?.amount || 0) / Math.max(installmentCount, 1))}</strong></div>
+          <label class="field purchase-paid-installments-field" data-purchase-paid-installments ${!(installmentCount > 1 && editing && allInstallmentsPaid(editing)) ? "hidden" : ""}><span>Parcelas já pagas</span><input name="paidInstallmentsCount" type="number" inputmode="numeric" min="0" max="${installmentCount}" step="1" value="${paidInstallmentCount}"></label>
         </div>
         <label class="field"><span class="field-title">Categoria</span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
-        <label class="field"><span>Status</span><select name="status"><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
+        <label class="field"><span>Status</span><select name="status" data-purchase-status><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
         <button class="primary-button card-save-button purchase-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar compra</span></button>
       </div>
     </form>`;
@@ -3617,6 +4309,14 @@ function profileTemplate() {
       <p>@${escapeHtml(user.username)} · ${user.role === "master" ? "Administrador master" : "Usuário"}</p>
       ${user.role === "user" ? `<div class="access-date">Acesso válido até <b>${formatDate(user.accessExpiresAt, true)}</b></div>` : ""}
     </article>
+    ${hasMasterRole() ? `<section class="profile-context-switch" aria-label="Alternar contexto de uso">
+      <span class="eyebrow">Trocar de perfil</span>
+      <div class="profile-context-options">
+        <button type="button" data-switch-view-mode="master" class="${isMasterView() ? "active" : ""}" ${isMasterView() ? "disabled" : ""}>MASTER GLOBAL</button>
+        <button type="button" data-switch-view-mode="user" class="${isUserView() ? "active" : ""}" ${isUserView() ? "disabled" : ""}>MINHA CONTA</button>
+      </div>
+      <small>${isMasterView() ? "Visão administrativa global ativa." : "Somente seus próprios dados financeiros estão carregados."}</small>
+    </section>` : ""}
     <article class="app-version-card">
       <div>
         <span>Versão do Aplicativo</span>
@@ -3892,55 +4592,56 @@ function filteredSupportTickets() {
   }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function userFormTemplate(editing = null, standalone = false) {
+  const form = `<form class="admin-form ${standalone ? "user-create-form" : ""}" id="user-form">
+    ${!standalone ? `<div class="form-title-row"><h2>${editing ? "Editar usuário" : "Novo usuário"}</h2><button type="button" class="text-button" data-cancel-edit>Cancelar</button></div>` : ""}
+    <input type="hidden" name="id" value="${editing?.id || ""}">
+    <label class="field"><span>Nome completo</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Nome do usuário"></label>
+    <label class="field"><span>Nome de Usuário</span><input name="username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" value="${escapeAttribute(editing?.username || "")}" placeholder="Ex.: cliente01"></label>
+    <label class="field"><span>WhatsApp</span><input name="whatsapp" required inputmode="tel" value="${escapeAttribute(editing?.whatsapp || "")}" placeholder="(00) 00000-0000"></label>
+    <label class="field"><span>E-mail</span><input name="email" type="email" required value="${escapeAttribute(editing?.email || "")}" placeholder="cliente@email.com"></label>
+    <label class="field"><span>${editing ? "Nova senha (opcional)" : "Senha inicial"}</span><input name="password" type="password" minlength="6" ${editing ? "" : "required"} placeholder="${editing ? "Mantenha em branco para não alterar" : "Mínimo de 6 caracteres"}"></label>
+    <label class="field"><span>Validade do acesso</span><input name="accessExpiresAt" type="date" min="${dateOffset()}" required value="${editing?.accessExpiresAt || futureDate(30)}"></label>
+    <div class="quick-validity"><span>Definir validade rápida</span><div>${[1,2,3,6,12].map(months => `<button type="button" data-validity-months="${months}">${months} ${months === 1 ? "mês" : "meses"}</button>`).join("")}</div></div>
+    <label class="field"><span>Valor da renovação</span><div class="money-input"><b>R$</b><input name="renewalPrice" required inputmode="decimal" value="${String(editing?.renewalPrice ?? 49.9).replace(".", ",")}"></div></label>
+    <button class="primary-button">${editing ? "Salvar alterações" : "Cadastrar usuário"}</button>
+  </form>`;
+  if (!standalone) return form;
+  return `<section class="user-create-page">
+    <button class="receivables-back-header user-create-back" type="button" data-cancel-edit aria-label="Voltar para a lista de usuários">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+      <span><b class="eyebrow">Acesso master</b><strong>Novo usuário</strong><small>Cadastre um novo acesso.</small></span>
+    </button>
+    ${form}
+  </section>`;
+}
+
 function usersTemplate() {
   const editing = editingUserId ? regularUsers().find(user => user.id === editingUserId) : null;
+  if (userFormOpen && !editing) return userFormTemplate(null, true);
   const visibleUsers = filteredUsers();
   const title = ({ all: "Todos os usuários", active: "Usuários ativos", expiring: "Vencendo em 7 dias", expired: "Usuários vencidos" })[userListScope];
+  const advancedFilterCount = Number(userStatusFilter !== "all") + Number(userPeriodFilter !== "all") + Number(Boolean(userExpiryFilter));
   return `
     <div class="page-title"><span class="eyebrow">Acesso master</span><h1>${title}</h1><p>Cadastre, renove e controle os acessos.</p></div>
     ${!userFormOpen ? `<button class="new-user-button" data-new-user>+ NOVO USUÁRIO</button>` : ""}
-    ${userFormOpen ? `<form class="admin-form" id="user-form">
-      <div class="form-title-row">
-        <h2>${editing ? "Editar usuário" : "Novo usuário"}</h2>
-        <button type="button" class="text-button" data-cancel-edit>Cancelar</button>
+    ${userFormOpen ? userFormTemplate(editing) : ""}
+    <section class="user-filter-panel users-filter-panel ${userFiltersOpen ? "is-open" : ""}">
+      <div class="user-filter-bar">
+        <label class="search-field"><span>⌕</span><input id="user-search" value="${escapeAttribute(userSearch)}" placeholder="Pesquisar nome, usuário, WhatsApp ou e-mail"></label>
+        <button class="user-filter-toggle" type="button" data-toggle-user-filters aria-expanded="${userFiltersOpen}"><span>Filtros</span>${advancedFilterCount ? `<b>${advancedFilterCount}</b>` : ""}<i aria-hidden="true">${userFiltersOpen ? "−" : "+"}</i></button>
       </div>
-      <input type="hidden" name="id" value="${editing?.id || ""}">
-      <label class="field"><span>Nome completo</span><input name="name" required value="${escapeAttribute(editing?.name || "")}" placeholder="Nome do usuário"></label>
-      <label class="field"><span>Nome de Usuário</span><input name="username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" value="${escapeAttribute(editing?.username || "")}" placeholder="Ex.: cliente01"></label>
-      <label class="field"><span>WhatsApp</span><input name="whatsapp" required inputmode="tel" value="${escapeAttribute(editing?.whatsapp || "")}" placeholder="(00) 00000-0000"></label>
-      <label class="field"><span>E-mail</span><input name="email" type="email" required value="${escapeAttribute(editing?.email || "")}" placeholder="cliente@email.com"></label>
-      <label class="field"><span>${editing ? "Nova senha (opcional)" : "Senha inicial"}</span><input name="password" type="password" minlength="6" ${editing ? "" : "required"} placeholder="${editing ? "Mantenha em branco para não alterar" : "Mínimo de 6 caracteres"}"></label>
-      <label class="field"><span>Validade do acesso</span><input name="accessExpiresAt" type="date" min="${dateOffset()}" required value="${editing?.accessExpiresAt || futureDate(30)}"></label>
-      <div class="quick-validity">
-        <span>Definir validade rápida</span>
-        <div>${[1,2,3,6,12].map(months => `<button type="button" data-validity-months="${months}">${months} ${months === 1 ? "mês" : "meses"}</button>`).join("")}</div>
-      </div>
-      <label class="field"><span>Valor da renovação</span><div class="money-input"><b>R$</b><input name="renewalPrice" required inputmode="decimal" value="${String(editing?.renewalPrice ?? 49.9).replace(".", ",")}"></div></label>
-      <button class="primary-button">${editing ? "Salvar alterações" : "Cadastrar usuário"}</button>
-    </form>` : ""}
-    <section class="user-filter-panel">
-      <label class="search-field"><span>⌕</span><input id="user-search" value="${escapeAttribute(userSearch)}" placeholder="Pesquisar nome, usuário, WhatsApp ou e-mail"></label>
-      <div class="user-filter-grid">
-        <label><span>Status</span><select id="user-status-filter">
-          <option value="all">Todos</option>
-          <option value="active" ${userStatusFilter === "active" ? "selected" : ""}>Ativos</option>
-          <option value="blocked" ${userStatusFilter === "blocked" ? "selected" : ""}>Bloqueados</option>
-          <option value="expired" ${userStatusFilter === "expired" ? "selected" : ""}>Vencidos</option>
-        </select></label>
-        <label><span>Período</span><select id="user-period-filter">
-          <option value="all">Qualquer período</option>
-          <option value="7" ${userPeriodFilter === "7" ? "selected" : ""}>Próximos 7 dias</option>
-          <option value="30" ${userPeriodFilter === "30" ? "selected" : ""}>Próximos 30 dias</option>
-          <option value="expired" ${userPeriodFilter === "expired" ? "selected" : ""}>Já vencidos</option>
-        </select></label>
-      </div>
-      <label class="filter-date"><span>Data de vencimento</span><input id="user-expiry-filter" type="date" value="${userExpiryFilter}"></label>
-      ${hasUserFilters() ? `<button class="clear-filters" data-clear-user-filters>Limpar filtros</button>` : ""}
+      ${userFiltersOpen ? `<div class="user-advanced-filters">
+        <div class="user-filter-grid">
+          <label><span>Status</span><select id="user-status-filter"><option value="all">Todos</option><option value="active" ${userStatusFilter === "active" ? "selected" : ""}>Ativos</option><option value="blocked" ${userStatusFilter === "blocked" ? "selected" : ""}>Bloqueados</option><option value="expired" ${userStatusFilter === "expired" ? "selected" : ""}>Vencidos</option></select></label>
+          <label><span>Período</span><select id="user-period-filter"><option value="all">Qualquer período</option><option value="7" ${userPeriodFilter === "7" ? "selected" : ""}>Próximos 7 dias</option><option value="30" ${userPeriodFilter === "30" ? "selected" : ""}>Próximos 30 dias</option><option value="expired" ${userPeriodFilter === "expired" ? "selected" : ""}>Já vencidos</option></select></label>
+        </div>
+        <label class="filter-date"><span>Data de vencimento</span><input id="user-expiry-filter" type="date" value="${userExpiryFilter}"></label>
+        ${hasUserFilters() ? `<button class="clear-filters" data-clear-user-filters>Limpar filtros</button>` : ""}
+      </div>` : ""}
     </section>
     <div class="section-header"><div><span class="eyebrow">Gestão de acesso</span><h2>${title}</h2></div><span class="list-count">${visibleUsers.length}</span></div>
-    <div class="user-list">
-      ${visibleUsers.map(user => userRow(user)).join("") || `<div class="empty">Nenhum usuário encontrado neste filtro.</div>`}
-    </div>`;
+    <div class="user-list">${visibleUsers.map(user => userRow(user)).join("") || `<div class="empty">Nenhum usuário encontrado neste filtro.</div>`}</div>`;
 }
 
 function filteredUsers() {
@@ -4069,42 +4770,86 @@ function bindLogin() {
   }));
   document.querySelector("#login-form")?.addEventListener("submit", async event => {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const username = data.get("username").trim().toLowerCase();
     const password = data.get("password");
-    let user;
+    const previousLoginState = { session, sessionMode, sessionAuthUserId, viewMode, db };
+    let resolvedUser;
     try {
-      user = await loadUserByCredentials(username, password);
+      resolvedUser = await loadUserByUsername(username);
     } catch (error) {
       return showToast("Não foi possível conectar. Verifique sua internet.");
     }
-    if (!user) return showToast("Usuário ou senha incorretos.");
+    if (!resolvedUser) return showToast("Usuário ou senha incorretos.");
+    let user;
+    if (resolvedUser.authUserId) {
+      try {
+        user = await authenticateAuthUser(resolvedUser, password);
+      } catch (error) {
+        console.warn("[MEU BOLSO][Auth] login Auth não concluído", error?.message || "AUTH_LOGIN_FAILED");
+        return showToast("Usuário ou senha incorretos.");
+      }
+    } else {
+      sessionMode = LEGACY_SESSION_MODE;
+      sessionAuthUserId = null;
+      try {
+        user = await loadLegacyUserByCredentials(username, password);
+      } catch (error) {
+        return showToast("Não foi possível conectar. Verifique sua internet.");
+      }
+      if (!user) return showToast("Usuário ou senha incorretos.");
+    }
     if (isAccessBlocked(user)) {
-      event.currentTarget.insertAdjacentHTML("afterbegin", `<div class="login-alert">Seu acesso expirou. Entre em contato com o administrador.</div>`);
+      if (sessionMode === AUTH_SESSION_MODE) await supabaseAuthClient?.auth.signOut();
+      clearSession();
+      form.querySelector(".login-alert")?.remove();
+      form.insertAdjacentHTML("afterbegin", `<div class="login-alert">${escapeHtml(accessRestrictionMessage(user))}</div>`);
       return;
     }
     session = user.id;
+    viewMode = user.role === "master" ? MASTER_VIEW_MODE : USER_VIEW_MODE;
+    invalidateDatabaseLoads();
+    const loginGeneration = databaseLoadGeneration;
+    const loginViewMode = viewMode;
     try {
-      if (user.role === "master") {
-        db = await loadScopedDatabase(user);
-      } else {
-        db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
-        await refreshUserFinancialData();
-      }
+      await loadScopedDatabase(user);
     } catch (error) {
+      if (isRestRequestTimeoutError(error)) {
+        if (sessionMode === AUTH_SESSION_MODE) await supabaseAuthClient?.auth.signOut({ scope: "local" });
+        invalidateDatabaseLoads();
+        session = previousLoginState.session;
+        sessionMode = previousLoginState.sessionMode;
+        sessionAuthUserId = previousLoginState.sessionAuthUserId;
+        viewMode = previousLoginState.viewMode;
+        db = previousLoginState.db;
+        return showToast("Não foi possível carregar seus dados. Verifique a conexão e tente novamente.");
+      }
+      if (sessionMode === AUTH_SESSION_MODE) await supabaseAuthClient?.auth.signOut();
       clearSession();
       return showToast("Não foi possível carregar os dados do usuário.");
     }
+    if (session !== user.id || viewMode !== loginViewMode || databaseLoadGeneration !== loginGeneration || currentUser()?.id !== user.id) return;
     currentView = "home";
-    saveSession(user);
-    logActivity("Fez login no aplicativo.", user.id);
+    saveSession(user, { mode: sessionMode, authUserId: sessionAuthUserId });
     render();
+    try {
+      logActivity("Fez login no aplicativo.", user.id);
+    } catch {
+      console.warn("[MEU BOLSO][Login] registro de atividade nao concluido.");
+    }
+    try {
+      clearPasswordFields(form);
+    } catch {
+      console.warn("[MEU BOLSO][Login] limpeza dos campos de senha nao concluida.");
+    }
   });
   document.querySelector("#register-form")?.addEventListener("submit", registerUser);
 }
 
 async function registerUser(event) {
   event.preventDefault();
+  if (!navigator.onLine) return showToast("Esta operação requer conexão com a internet.");
   const data = new FormData(event.currentTarget);
   const username = data.get("username").trim().toLowerCase();
   const whatsapp = normalizePhone(data.get("whatsapp"));
@@ -4114,15 +4859,16 @@ async function registerUser(event) {
   if (db.users.some(user => user.username.toLowerCase() === username)) return showToast("Este nome de usuário já existe.");
   if (db.users.some(user => normalizePhone(user.whatsapp) === whatsapp)) return showToast("Este WhatsApp já está cadastrado.");
   if (db.users.some(user => user.email?.toLowerCase() === email)) return showToast("Este e-mail já está cadastrado.");
+  let legacyPassword = data.get("password");
   const newId = crypto.randomUUID();
   const newUser = {
     id: newId,
     name: data.get("name").trim(),
     username,
-    password: data.get("password"),
     whatsapp: data.get("whatsapp").trim(),
     email,
     role: "user",
+    authUserId: null,
     createdAt: dateOffset(),
     accessExpiresAt: futureDate(30),
     blocked: false,
@@ -4135,7 +4881,7 @@ async function registerUser(event) {
   db.categories[newId] = defaultCategoryRecords();
   db.accounts[newId] = [...DEFAULT_ACCOUNTS];
   try {
-    await saveNewUserToSupabase(newUser);
+    await saveNewUserToSupabase(newUser, legacyPassword);
     await upsertRows("categorias", db.categories[newId].map(item => categoryToSupabaseRow(item, newId)));
     await upsertRows("tipos_conta", db.accounts[newId].map(nome => ({ id: crypto.randomUUID(), usuario_id: newId, nome })));
   } catch (error) {
@@ -4146,11 +4892,18 @@ async function registerUser(event) {
     delete db.categories[newId];
     delete db.accounts[newId];
     return showToast("Não foi possível salvar no Supabase.");
+  } finally {
+    legacyPassword = "";
+    clearPasswordFields(event.currentTarget);
   }
   session = newId;
+  sessionMode = LEGACY_SESSION_MODE;
+  sessionAuthUserId = null;
+  viewMode = USER_VIEW_MODE;
+  invalidateDatabaseLoads();
   authView = "login";
   currentView = "home";
-  saveSession(newUser);
+  saveSession(newUser, { mode: LEGACY_SESSION_MODE, authUserId: null });
   try {
     await refreshCurrentUserData();
   } catch (error) {
@@ -4244,8 +4997,15 @@ function bindAppEvents() {
       return;
     }
     if (target === "transactions" && currentView !== "transactions") transactionsReturnView = currentView;
+    if (currentView === "cardPurchases" && target !== "cardPurchases") {
+      cardPurchaseFilter = "pending";
+      cardPurchaseMonth = "";
+    }
     if (target === "card" && !["card", "cardPurchases", "purchaseEditor", "installments"].includes(currentView)) cardsReturnView = currentView;
-    if (target === "users") userListScope = "all";
+    if (target === "users") {
+      userListScope = "all";
+      if (userFormOpen && !editingUserId) userFormOpen = false;
+    }
     if (target === "home" && !isMaster()) {
       try {
         await ensureMonthlyOccurrences(session);
@@ -4257,7 +5017,7 @@ function bindAppEvents() {
     render();
   }));
   document.querySelectorAll("[data-user-scope]").forEach(button => button.addEventListener("click", () => {
-    if (!isMaster()) return;
+    if (!canUseMasterContext()) return;
     userListScope = button.dataset.userScope;
     resetUserFilters();
     currentView = "users";
@@ -4445,6 +5205,7 @@ function bindAppEvents() {
   const purchaseForm = document.querySelector("#purchase-form");
   purchaseForm?.addEventListener("submit", saveCardPurchase);
   purchaseForm?.querySelector("[data-purchase-payment-mode]")?.addEventListener("change", updatePurchasePaymentFields);
+  purchaseForm?.querySelector("[data-purchase-status]")?.addEventListener("change", updatePurchasePaymentFields);
   purchaseForm?.elements.installments?.addEventListener("change", updatePurchasePaymentFields);
   purchaseForm?.elements.amount?.addEventListener("input", updatePurchasePaymentFields);
   document.querySelector("[data-close-purchase-dialog]")?.addEventListener("click", closePurchaseEditor);
@@ -4472,15 +5233,6 @@ function bindAppEvents() {
     requestMethod: true,
     dueDate: button.dataset.installmentDueDate || ""
   })));
-  document.querySelectorAll("[data-edit-installment-date]").forEach(button => button.addEventListener("click", () => openInstallmentDateDialog(
-    button.dataset.editInstallmentDate,
-    Number(button.dataset.installmentNumber),
-    button.dataset.installmentId
-  )));
-  document.querySelector("#installment-date-form")?.addEventListener("submit", saveInstallmentDate);
-  document.querySelectorAll("[data-cancel-installment-date]").forEach(button => button.addEventListener("click", closeInstallmentDateDialog));
-  const installmentDateDialog = document.querySelector("#installment-date-dialog");
-  if (installmentDateDialog) installmentDateDialog.oncancel = () => { editingInstallmentDate = null; };
   document.querySelectorAll("[data-pay-invoice]").forEach(button => button.addEventListener("click", event => payCardInvoice(event.currentTarget.dataset.payInvoice)));
   document.querySelectorAll("[data-toggle-registered-card]").forEach(button => button.addEventListener("click", () => {
     const cardId = button.dataset.toggleRegisteredCard;
@@ -4489,9 +5241,25 @@ function bindAppEvents() {
   }));
   document.querySelectorAll("[data-open-card-purchases]").forEach(button => button.addEventListener("click", () => {
     selectedCardId = button.dataset.openCardPurchases;
+    cardPurchaseFilter = "pending";
+    cardPurchaseMonth = "";
     currentView = "cardPurchases";
     render();
   }));
+  document.querySelector("[data-card-purchase-filter]")?.addEventListener("change", event => {
+    cardPurchaseFilter = ["pending", "paid", "month"].includes(event.currentTarget.value) ? event.currentTarget.value : "pending";
+    cardPurchaseMonth = cardPurchaseFilter === "month" ? cardPurchaseMonth || cardInvoiceTargetMonth(selectedCardId) : "";
+    render();
+  });
+  document.querySelector("[data-card-purchase-month]")?.addEventListener("change", event => {
+    if (/^\d{4}-\d{2}$/.test(event.currentTarget.value)) cardPurchaseMonth = event.currentTarget.value;
+    render();
+  });
+  document.querySelector("[data-card-purchase-current]")?.addEventListener("click", () => {
+    cardPurchaseFilter = "pending";
+    cardPurchaseMonth = "";
+    render();
+  });
   document.querySelectorAll("[data-edit-card]").forEach(button => button.addEventListener("click", () => {
     openCardDialog(button.dataset.editCard);
   }));
@@ -4519,8 +5287,11 @@ function bindAppEvents() {
   document.querySelectorAll("[data-manage-list]").forEach(button => {
     button.onclick = () => openListManager(button.dataset.manageList);
   });
+  document.querySelectorAll("[data-switch-view-mode]").forEach(button => button.addEventListener("click", () => {
+    switchViewMode(button.dataset.switchViewMode);
+  }));
   document.querySelector("[data-logout]")?.addEventListener("click", async () => {
-    if (await confirmAction()) logout();
+    if (await confirmAction()) await logout();
   });
   document.querySelector("[data-check-updates]")?.addEventListener("click", checkAppUpdates);
   document.querySelector("[data-smart-install]")?.addEventListener("click", handleSmartInstall);
@@ -4536,8 +5307,12 @@ function bindAppEvents() {
     showToast("Operação cancelada.");
     render();
   });
+  document.querySelector("[data-toggle-user-filters]")?.addEventListener("click", () => {
+    userFiltersOpen = !userFiltersOpen;
+    render();
+  });
   document.querySelectorAll("[data-edit-user]").forEach(button => button.addEventListener("click", () => {
-    if (!isMaster()) return;
+    if (!canUseMasterContext()) return;
     editingUserId = button.dataset.editUser;
     userFormOpen = true;
     render();
@@ -4587,10 +5362,11 @@ function bindAppEvents() {
   document.querySelectorAll("[data-reply-form]").forEach(form => form.addEventListener("submit", sendSupportReply));
   document.querySelector("[data-clear-user-filters]")?.addEventListener("click", () => {
     resetUserFilters();
+    userFiltersOpen = false;
     render();
   });
   document.querySelectorAll("[data-report-user]").forEach(button => button.addEventListener("click", () => {
-    if (!isMaster()) return;
+    if (!canUseMasterContext()) return;
     reportUserId = button.dataset.reportUser;
     currentView = "reports";
     render();
@@ -4611,15 +5387,45 @@ function bindReportEvents() {
   });
 }
 
-function logout() {
+function clearPasswordFields(root = document) {
+  const forms = [
+    ...(root.matches?.("form") ? [root] : []),
+    ...root.querySelectorAll("form")
+  ].filter(form => form.querySelector("input[type='password']"));
+  forms.forEach(form => form.reset());
+  root.querySelectorAll("input[type='password']").forEach(input => {
+    input.value = "";
+    input.defaultValue = "";
+    input.removeAttribute("value");
+  });
+}
+
+function clearPasswordInputValues(root = document) {
+  root.querySelectorAll?.("input[type='password']").forEach(input => {
+    input.value = "";
+    input.defaultValue = "";
+    input.removeAttribute("value");
+  });
+}
+
+async function logout() {
+  clearPasswordFields();
+  const previousMode = sessionMode;
+  if (previousMode === AUTH_SESSION_MODE && supabaseAuthClient) {
+    const { error } = await supabaseAuthClient.auth.signOut();
+    if (error) return showToast("Não foi possível encerrar a sessão Auth.");
+  }
   clearSession();
-  currentView = "home";
+  db = emptyDatabase();
+  localStorage.removeItem(LOCAL_DB_KEY);
+  resetViewTransientState();
   authView = "login";
   transactionFilter = "all";
   transactionSearch = "";
   transactionStatusFilter = "all";
   transactionPeriodFilter = "all";
   render();
+  clearPasswordFields();
   showToast("Operação realizada com sucesso.");
 }
 
@@ -4636,16 +5442,25 @@ async function checkAppUpdates() {
 }
 
 async function autoCheckAppUpdates() {
-  try {
-    await syncOfflineQueue();
-    await updateServiceWorker();
-    if (session) {
-      if (isMaster()) await refreshMasterData();
-      else await refreshUserFinancialData();
-      render();
+  if (activeAutoUpdatePromise) return activeAutoUpdatePromise;
+  const promise = (async () => {
+    try {
+      await syncOfflineQueue();
+      await updateServiceWorker();
+      if (session) {
+        if (viewMode === MASTER_VIEW_MODE) await refreshMasterData();
+        else await refreshUserFinancialData();
+        render();
+      }
+    } catch (error) {
+      console.warn("[MEU BOLSO][PWA] atualização automática não concluída", error);
     }
-  } catch (error) {
-    console.warn("[MEU BOLSO][PWA] atualização automática não concluída", error);
+  })();
+  activeAutoUpdatePromise = promise;
+  try {
+    return await promise;
+  } finally {
+    if (activeAutoUpdatePromise === promise) activeAutoUpdatePromise = null;
   }
 }
 
@@ -4821,16 +5636,24 @@ function dueNotificationLogKey() {
   return `${DUE_NOTIFICATION_LOG_KEY}:${session}:${dateOffset()}`;
 }
 
+function cardDueNotificationLogKey() {
+  return `${CARD_DUE_NOTIFICATION_LOG_KEY}:${session}`;
+}
+
 function sentDueNotificationKeys() {
   try {
-    return new Set(JSON.parse(localStorage.getItem(dueNotificationLogKey()) || "[]"));
+    const daily = JSON.parse(localStorage.getItem(dueNotificationLogKey()) || "[]");
+    const card = JSON.parse(localStorage.getItem(cardDueNotificationLogKey()) || "[]");
+    return new Set([...(Array.isArray(daily) ? daily : []), ...(Array.isArray(card) ? card : [])]);
   } catch {
     return new Set();
   }
 }
 
 function saveSentDueNotificationKeys(keys) {
-  localStorage.setItem(dueNotificationLogKey(), JSON.stringify([...keys]));
+  const values = [...keys];
+  localStorage.setItem(dueNotificationLogKey(), JSON.stringify(values.filter(key => !key.startsWith("card:"))));
+  localStorage.setItem(cardDueNotificationLogKey(), JSON.stringify(values.filter(key => key.startsWith("card:"))));
 }
 
 function dueNotificationCandidates() {
@@ -4848,22 +5671,7 @@ function dueNotificationCandidates() {
       };
     });
 
-  const cardGroups = new Map();
-  cardInstallmentItems()
-    .filter(item => !isPaidStatus(item) && item.dueDate && item.dueDate <= today)
-    .forEach(item => {
-      const state = item.dueDate === today ? "vence hoje" : "está vencida";
-      const groupKey = `${item.cardName}:${item.dueDate}:${state}`;
-      const current = cardGroups.get(groupKey) || { cardName: item.cardName, dueDate: item.dueDate, state, amount: 0 };
-      current.amount += item.amount;
-      cardGroups.set(groupKey, current);
-    });
-
-  const cardItems = [...cardGroups.values()].map(group => ({
-    key: `card:${group.cardName}:${group.dueDate}:${group.state}`,
-    body: `Fatura ${group.cardName} ${group.state}. Valor: ${money(group.amount)}`,
-    url: "/?view=card"
-  }));
+  const cardItems = cardInvoicePushCandidates(today);
 
   return [...items, ...cardItems];
 }
@@ -4891,13 +5699,24 @@ async function showAppNotification(body, tag, url = "/") {
 
 async function checkDueNotifications() {
   if (!session || isMaster() || notificationPermission() !== "granted") return;
-  const sent = sentDueNotificationKeys();
-  const pending = dueNotificationCandidates().filter(item => !sent.has(item.key));
-  for (const item of pending) {
-    const delivered = await showAppNotification(item.body, `due-${item.key}`, item.url).catch(() => false);
-    if (delivered) sent.add(item.key);
+  const deliver = async () => {
+    const sent = sentDueNotificationKeys();
+    const pending = dueNotificationCandidates().filter(item => !sent.has(item.key));
+    for (const item of pending) {
+      sent.add(item.key);
+      saveSentDueNotificationKeys(sent);
+      const delivered = await showAppNotification(item.body, `due-${item.key}`, item.url).catch(() => false);
+      if (!delivered) {
+        sent.delete(item.key);
+        saveSentDueNotificationKeys(sent);
+      }
+    }
+  };
+  if (navigator.locks?.request) {
+    await navigator.locks.request(`meu-bolso-due-notifications:${session}`, deliver);
+    return;
   }
-  if (pending.length) saveSentDueNotificationKeys(sent);
+  await deliver();
 }
 
 function applyNotificationViewFromUrl() {
@@ -5227,74 +6046,6 @@ function closeCardDialog() {
   editingCardId = null;
 }
 
-function canEditTestInstallmentDates() {
-  const user = currentUser();
-  return Boolean(user && user.id === session && user.role === "user" && String(user.username || "").trim().toLocaleLowerCase("pt-BR") === "teste");
-}
-
-function openInstallmentDateDialog(purchaseId, installmentNumber, installmentId) {
-  if (!canEditTestInstallmentDates()) return showToast("Acesso não autorizado.");
-  const purchase = userCardPurchases().find(item => item.id === purchaseId);
-  const realInstallmentId = purchase?.installmentIds?.[installmentNumber];
-  if (!purchase || !realInstallmentId || realInstallmentId !== installmentId) return showToast("Parcela não encontrada.");
-  const dueDate = installmentDueDate(purchase, installmentNumber);
-  const key = `${monthKey(dueDate)}-${installmentNumber}`;
-  if ((purchase.paidInstallments || []).includes(key)) return showToast("Não é possível alterar o vencimento de uma parcela paga.");
-  const dialog = document.querySelector("#installment-date-dialog");
-  const form = document.querySelector("#installment-date-form");
-  if (!dialog || !form) return;
-  editingInstallmentDate = { purchaseId, installmentNumber, installmentId, currentDueDate: dueDate };
-  document.querySelector("#installment-date-purchase-name").textContent = purchase.name;
-  document.querySelector("#installment-date-number").textContent = `Parcela ${installmentNumber}/${purchase.installments}`;
-  document.querySelector("#installment-date-current").textContent = formatDate(dueDate, true);
-  form.elements.newDueDate.value = dueDate;
-  dialog.showModal();
-}
-
-function closeInstallmentDateDialog() {
-  document.querySelector("#installment-date-dialog")?.close();
-  editingInstallmentDate = null;
-}
-
-async function saveInstallmentDate(event) {
-  event.preventDefault();
-  if (!canEditTestInstallmentDates() || !editingInstallmentDate) return showToast("Acesso não autorizado.");
-  if (!navigator.onLine) return showToast("Conecte-se à internet para salvar a nova data no Supabase.");
-  const user = currentUser();
-  const { purchaseId, installmentNumber, installmentId } = editingInstallmentDate;
-  const purchase = userCardPurchases().find(item => item.id === purchaseId);
-  if (!purchase || purchase.installmentIds?.[installmentNumber] !== installmentId) return showToast("Parcela não encontrada.");
-  const currentDueDate = installmentDueDate(purchase, installmentNumber);
-  const currentKey = `${monthKey(currentDueDate)}-${installmentNumber}`;
-  if ((purchase.paidInstallments || []).includes(currentKey)) return showToast("Não é possível alterar o vencimento de uma parcela paga.");
-  const newDueDate = new FormData(event.currentTarget).get("newDueDate");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDueDate || "")) return showToast("Informe uma data válida.");
-  if (newDueDate === currentDueDate) return closeInstallmentDateDialog();
-  try {
-    await supabaseRequest("rpc/editar_vencimento_parcela_teste", {
-      method: "POST",
-      body: {
-        p_parcela_id: installmentId,
-        p_usuario_id: user.id,
-        p_senha: user.password,
-        p_nova_data: newDueDate
-      },
-      prefer: "return=representation"
-    });
-    purchase.installmentDueDates ||= {};
-    purchase.installmentDueDates[installmentNumber] = newDueDate;
-    cacheDatabase();
-    closeInstallmentDateDialog();
-    if (navigator.onLine) await refreshUserFinancialData();
-  } catch (error) {
-    console.error("[MEU BOLSO][Supabase] erro ao editar vencimento da parcela", error);
-    return showToast("Não foi possível salvar a nova data no Supabase.");
-  }
-  logActivity(`Alterou o vencimento da parcela ${installmentNumber}/${purchase.installments} de ${purchase.name} para ${formatDate(newDueDate, true)}.`);
-  showToast("Vencimento atualizado com sucesso.");
-  render();
-}
-
 function editTransaction(transactionId) {
   if (isMaster()) return;
   const item = userTransactions().find(transaction => transaction.id === transactionId);
@@ -5364,25 +6115,54 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     return;
   }
   db.transactions[session] ||= [];
+  const transactionsBeforeSave = db.transactions[session].map(item => ({ ...item }));
   let savedItem;
   let previousType = values.type;
+  let recurringEditPlan = null;
+  let recurringItemsToSave = [];
   const wasEditingTransaction = Boolean(editingTransactionId);
   if (editingTransactionId) {
     const index = db.transactions[session].findIndex(item => item.id === editingTransactionId);
     if (index < 0) return showToast("Não foi possível concluir a operação.");
     previousType = db.transactions[session][index].type;
-    db.transactions[session][index] = { ...db.transactions[session][index], ...values };
-    savedItem = db.transactions[session][index];
+    recurringEditPlan = monthlyExpenseEditPlan(db.transactions[session], editingTransactionId, values);
+    if (recurringEditPlan) {
+      const changesById = new Map(recurringEditPlan.changes.map(change => [change.next.id, change.next]));
+      db.transactions[session] = db.transactions[session].map(item => changesById.get(item.id) || item);
+      recurringItemsToSave = recurringEditPlan.changes.map(change => change.next);
+      savedItem = changesById.get(editingTransactionId);
+    } else {
+      const recurrenceId = previousType === "expense" && values.type === "expense" && values.repeat === "fixed"
+        ? (db.transactions[session][index].recurrenceId || crypto.randomUUID())
+        : db.transactions[session][index].recurrenceId;
+      db.transactions[session][index] = { ...db.transactions[session][index], ...values, recurrenceId };
+      savedItem = db.transactions[session][index];
+    }
   } else {
-    savedItem = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...values };
+    savedItem = {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      ...values,
+      recurrenceId: values.type === "expense" && values.repeat === "fixed" ? crypto.randomUUID() : undefined
+    };
     db.transactions[session].unshift(savedItem);
   }
   try {
-    await saveTransactionToSupabase(savedItem, previousType);
-    await refreshUserFinancialData();
+    if (recurringItemsToSave.length) await saveMonthlyExpenseSeriesToSupabase(recurringItemsToSave);
+    else await saveTransactionToSupabase(savedItem, previousType);
+    cacheDatabase();
+    try {
+      await refreshUserFinancialData();
+    } catch (error) {
+      if (!recurringItemsToSave.length) throw error;
+      lastSyncError = error.message;
+      console.warn("[MEU BOLSO][RECORRÊNCIA] edição confirmada; refresh pendente", error);
+    }
     const refreshedItem = (db.transactions[session] || []).find(item => item.id === savedItem.id);
     if (refreshedItem && savedItem.createdAt) refreshedItem.createdAt = savedItem.createdAt;
   } catch (error) {
+    db.transactions[session] = transactionsBeforeSave;
+    cacheDatabase();
     return showToast("Não foi possível salvar no Supabase.");
   }
   logActivity(`${actionVerb(wasEditingTransaction, "Cadastrou", "Editou")} ${savedItem.type === "income" ? "receita" : "despesa"} ${savedItem.name}. Valor: ${money(savedItem.amount)}`);
@@ -5396,6 +6176,31 @@ async function deleteTransaction(transactionId) {
   if (isMaster() || !await confirmAction()) return;
   const item = (db.transactions[session] || []).find(transaction => transaction.id === transactionId);
   if (!item) return showToast("Não foi possível concluir a operação.");
+  const recurringDeletePlan = monthlyExpenseDeletePlan(db.transactions[session] || [], transactionId);
+  if (recurringDeletePlan) {
+    const transactionsBeforeDelete = db.transactions[session].map(transaction => ({ ...transaction }));
+    const changesById = new Map(recurringDeletePlan.changes.map(change => [change.next.id, change.next]));
+    const closureItems = recurringDeletePlan.changes.map(change => change.next);
+    db.transactions[session] = db.transactions[session].map(transaction => changesById.get(transaction.id) || transaction);
+    try {
+      await saveMonthlyExpenseSeriesToSupabase(closureItems);
+      cacheDatabase();
+      try {
+        await refreshUserFinancialData();
+      } catch (error) {
+        lastSyncError = error.message;
+        console.warn("[MEU BOLSO][RECORRÊNCIA] encerramento confirmado; refresh pendente", error);
+      }
+    } catch (error) {
+      db.transactions[session] = transactionsBeforeDelete;
+      cacheDatabase();
+      return showDeleteError(error);
+    }
+    logActivity(`Encerrou despesa mensal ${item.name} a partir de ${recurringDeletePlan.startingMonth}. Valor anterior: ${money(item.amount)}`);
+    showToast("Operação realizada com sucesso.");
+    render();
+    return;
+  }
   try {
     await deleteRowById(item.type === "income" ? "receitas" : "despesas", item.id);
     db.transactions[session] = (db.transactions[session] || []).filter(transaction => transaction.id !== transactionId);
@@ -5472,6 +6277,14 @@ function updatePurchasePaymentFields() {
   }
   const amount = parseMoney(form.elements.amount.value);
   const installments = Math.max(Number(form.elements.installments.value || 1), 1);
+  const paidInstallmentsField = form.querySelector("[data-purchase-paid-installments]");
+  const paidInstallmentsInput = form.elements.paidInstallmentsCount;
+  const showPaidInstallments = paymentMode === "installments" && form.elements.status.value === "paid";
+  if (paidInstallmentsField) paidInstallmentsField.hidden = !showPaidInstallments;
+  if (paidInstallmentsInput) {
+    paidInstallmentsInput.max = String(installments);
+    paidInstallmentsInput.value = String(Math.min(Math.max(Number(paidInstallmentsInput.value || 0), 0), installments));
+  }
   const installmentValue = form.querySelector("[data-purchase-installment-value]");
   if (installmentValue) installmentValue.textContent = money(Number.isFinite(amount) ? amount / installments : 0);
 }
@@ -5479,6 +6292,8 @@ function updatePurchasePaymentFields() {
 function closePurchaseEditor() {
   document.querySelector("#purchase-dialog")?.close();
   editingPurchaseId = null;
+  cardPurchaseFilter = "pending";
+  cardPurchaseMonth = "";
   currentView = "cardPurchases";
   render();
 }
@@ -5511,7 +6326,7 @@ async function saveSupportTicket(event) {
 }
 
 async function updateSupportStatus(ticketId, status) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
   if (!ticket || !SUPPORT_STATUSES[status]) return showToast("Não foi possível concluir a operação.");
   if (!await confirmAction()) return;
@@ -5523,7 +6338,7 @@ async function updateSupportStatus(ticketId, status) {
 }
 
 function toggleSupportReply(ticketId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
   if (!ticket) return showToast("Não foi possível concluir a operação.");
   ticket.replyOpen = !ticket.replyOpen;
@@ -5532,7 +6347,7 @@ function toggleSupportReply(ticketId) {
 
 async function sendSupportReply(event) {
   event.preventDefault();
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === event.currentTarget.dataset.replyForm);
   if (!ticket) return showToast("Não foi possível concluir a operação.");
   const data = new FormData(event.currentTarget);
@@ -5551,7 +6366,7 @@ async function sendSupportReply(event) {
 }
 
 function openSupportWhatsapp(ticketId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   const ticket = (db.supportTickets || []).find(item => item.id === ticketId);
   if (!ticket) return showToast("Não foi possível concluir a operação.");
   const phone = normalizePhone(ticket.whatsapp);
@@ -5577,9 +6392,26 @@ async function deleteSupportTicket(ticketId) {
 
 async function saveUser(event) {
   event.preventDefault();
-  if (!isMaster()) return showToast("Acesso não autorizado.");
-  const data = new FormData(event.currentTarget);
+  if (activeUserSavePromise) return activeUserSavePromise;
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit'], button:not([type])");
+  const operation = saveUserOnce(form);
+  activeUserSavePromise = operation;
+  if (submitButton) submitButton.disabled = true;
+  try {
+    return await operation;
+  } finally {
+    if (activeUserSavePromise === operation) activeUserSavePromise = null;
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+async function saveUserOnce(form) {
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
+  if (!navigator.onLine) return showToast("Esta operação requer conexão com a internet.");
+  const data = new FormData(form);
   const id = data.get("id");
+  const creatingUser = !id;
   const username = data.get("username").trim().toLowerCase();
   const whatsapp = data.get("whatsapp").trim();
   const normalizedWhatsapp = normalizePhone(whatsapp);
@@ -5595,50 +6427,203 @@ async function saveUser(event) {
   const renewalPrice = Number(String(data.get("renewalPrice")).replace(/\./g, "").replace(",", "."));
   if (!Number.isFinite(renewalPrice) || renewalPrice < 0) return showToast("Não foi possível concluir a operação.");
 
-  if (id) {
-    const user = regularUsers().find(item => item.id === id);
-    if (!user) return showToast("Usuário não encontrado.");
-    user.name = data.get("name").trim();
-    user.username = username;
-    user.whatsapp = whatsapp;
-    user.email = email;
-    user.accessExpiresAt = data.get("accessExpiresAt");
-    user.renewalPrice = renewalPrice;
-    if (data.get("password")) user.password = data.get("password");
+  let createdUserId = null;
+  let creationLegacyPassword = "";
+  let remoteUserConfirmed = false;
+  let creationStateAmbiguous = false;
+  const initializationFailures = [];
+  const rollbackLocalCreation = () => {
+    if (!createdUserId) return;
+    db.users = db.users.filter(user => user.id !== createdUserId);
+    delete db.transactions[createdUserId];
+    delete db.cards[createdUserId];
+    delete db.cardPurchases[createdUserId];
+    delete db.categories[createdUserId];
+    delete db.accounts[createdUserId];
+  };
+  const finalizeConfirmedCreation = () => {
     editingUserId = null;
-  } else {
-    const newId = crypto.randomUUID();
-    db.users.push({
-      id: newId,
-      name: data.get("name").trim(),
-      username,
-      password: data.get("password"),
-      whatsapp,
-      email,
-      role: "user",
-      createdAt: dateOffset(),
-      accessExpiresAt: data.get("accessExpiresAt"),
-      blocked: false,
-      renewalPrice
-    });
-    db.transactions[newId] = [];
-    db.cards[newId] = [];
-    db.cardPurchases[newId] = [];
-    db.categories[newId] = defaultCategoryRecords();
-    db.accounts[newId] = [...DEFAULT_ACCOUNTS];
+    userFormOpen = false;
+    try {
+      form.reset();
+    } catch (error) {
+      if (!initializationFailures.includes("finalização visual")) initializationFailures.push("finalização visual");
+      console.error("[MEU BOLSO][Master] usuário criado; formulário não pôde ser resetado", error);
+    }
+  };
+  const renderUserListSafely = () => {
+    try {
+      render();
+      return true;
+    } catch (error) {
+      console.error("[MEU BOLSO][Master] usuário criado; lista não pôde ser renderizada", error);
+      form.remove?.();
+      return false;
+    }
+  };
+  try {
+    if (id) {
+      const user = regularUsers().find(item => item.id === id);
+      if (!user) return showToast("Usuário não encontrado.");
+      const requestedPassword = data.get("password");
+      if (user.authUserId && (email !== user.email?.toLowerCase() || requestedPassword)) {
+        return showToast("E-mail e senha de usuário Auth exigem o fluxo seguro de autenticação.");
+      }
+      user.name = data.get("name").trim();
+      user.username = username;
+      user.whatsapp = whatsapp;
+      user.email = email;
+      user.accessExpiresAt = data.get("accessExpiresAt");
+      user.renewalPrice = renewalPrice;
+      await updateUserFields(user.id, {
+        nome: user.name,
+        usuario: user.username,
+        whatsapp: user.whatsapp,
+        email: user.email,
+        data_vencimento: user.accessExpiresAt,
+        valor_renovacao: user.renewalPrice,
+        status: user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : daysUntilExpiry(user) <= 7 ? "vencendo" : "ativo"
+      });
+      if (requestedPassword) {
+        await updateLegacyPassword(user.id, requestedPassword);
+      }
+      editingUserId = null;
+    } else {
+      const existingRemoteUser = await loadUserByUsername(username);
+      if (existingRemoteUser) return showToast("Este nome de usuário já existe.");
+      const newId = crypto.randomUUID();
+      creationLegacyPassword = data.get("password");
+      const newUser = {
+        id: newId,
+        name: data.get("name").trim(),
+        username,
+        whatsapp,
+        email,
+        role: "user",
+        authUserId: null,
+        createdAt: dateOffset(),
+        accessExpiresAt: data.get("accessExpiresAt"),
+        blocked: false,
+        renewalPrice
+      };
+      createdUserId = newId;
+      db.users.push(newUser);
+      db.transactions[newId] = [];
+      db.cards[newId] = [];
+      db.cardPurchases[newId] = [];
+      db.categories[newId] = defaultCategoryRecords();
+      db.accounts[newId] = [...DEFAULT_ACCOUNTS];
+      try {
+        await saveNewUserToSupabase(newUser, creationLegacyPassword);
+        remoteUserConfirmed = true;
+      } catch (creationError) {
+        const creationOutcomeUncertain = isRemoteWriteOutcomeUncertain(creationError);
+        let reconciliationCompleted = false;
+        let reconciledUser = null;
+        try {
+          reconciledUser = await loadUserByUsername(username);
+          reconciliationCompleted = true;
+        } catch {
+          creationStateAmbiguous = true;
+        }
+        if (reconciledUser?.id === newId) {
+          remoteUserConfirmed = true;
+          creationStateAmbiguous = false;
+        } else if (reconciledUser) {
+          rollbackLocalCreation();
+          return showToast("Este nome de usuário já existe.");
+        } else if (reconciliationCompleted && !creationOutcomeUncertain) {
+          throw creationError;
+        } else {
+          creationStateAmbiguous = true;
+        }
+      }
+      if (remoteUserConfirmed) {
+        finalizeConfirmedCreation();
+        try {
+          await upsertRows("categorias", db.categories[newId].map(item => categoryToSupabaseRow(item, newId)));
+        } catch {
+          initializationFailures.push("categorias");
+        }
+        try {
+          await upsertRows("tipos_conta", db.accounts[newId].map(nome => ({ id: crypto.randomUUID(), usuario_id: newId, nome })));
+        } catch {
+          initializationFailures.push("tipos de conta");
+        }
+      }
+    }
+    if (!creatingUser) {
+      editingUserId = null;
+      userFormOpen = false;
+    }
+  } catch (error) {
+    if (creatingUser && remoteUserConfirmed) {
+      finalizeConfirmedCreation();
+      if (!initializationFailures.includes("configuração inicial")) initializationFailures.push("configuração inicial");
+      try {
+        clearPasswordInputValues(form);
+      } catch {
+        // A senha já saiu do escopo de persistência; a UI será substituída pela lista.
+      }
+      renderUserListSafely();
+      showToast("Usuário criado, mas não foi possível concluir a configuração inicial.");
+      return;
+    }
+    if (!remoteUserConfirmed && !creationStateAmbiguous) rollbackLocalCreation();
+    return showToast(creatingUser ? "Não foi possível cadastrar o usuário." : "Não foi possível salvar no Supabase.");
+  } finally {
+    creationLegacyPassword = "";
+    if (creatingUser) {
+      try {
+        clearPasswordInputValues(form);
+      } catch {
+        // A referência estável do formulário evita depender de event.currentTarget após await.
+      }
+    }
   }
-  userFormOpen = false;
-  await saveDatabase();
+  if (creationStateAmbiguous) {
+    editingUserId = null;
+    userFormOpen = false;
+    try {
+      form.reset();
+    } catch {
+      // O próximo render substitui o formulário mesmo se o reset nativo falhar.
+    }
+    renderUserListSafely();
+    showToast("Não foi possível confirmar se o usuário foi criado. Atualize a lista antes de tentar novamente.");
+    return;
+  }
+  let refreshFailed = false;
   try {
     await refreshMasterData();
   } catch (error) {
+    refreshFailed = true;
     console.error("[MEU BOLSO][Supabase] erro ao recarregar usuários master", error);
   }
-  showToast("Operação realizada com sucesso.");
-  render();
+  try {
+    clearPasswordInputValues(form);
+  } catch {
+    // O formulário já foi fechado após confirmação remota.
+  }
+  let finalMessage;
+  if (createdUserId && initializationFailures.length) {
+    finalMessage = "Usuário criado, mas não foi possível concluir a configuração inicial. Atualize e tente completar depois.";
+  } else if (createdUserId && refreshFailed) {
+    finalMessage = "Usuário criado com sucesso. Atualize a lista para visualizar os dados mais recentes.";
+  } else if (createdUserId) {
+    finalMessage = "Usuário cadastrado com sucesso.";
+  } else {
+    finalMessage = "Operação realizada com sucesso.";
+  }
+  const listRendered = renderUserListSafely();
+  if (createdUserId && !listRendered && !initializationFailures.length && !refreshFailed) {
+    finalMessage = "Usuário criado com sucesso. Atualize a lista para visualizar os dados mais recentes.";
+  }
+  showToast(finalMessage);
 }
 
 async function deleteUserCascade(userId) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
   const userFilter = supabaseEq("usuario_id", userId);
   await deleteRows("parcelas", userFilter);
   await deleteRows("compras_cartao", userFilter);
@@ -5649,11 +6634,11 @@ async function deleteUserCascade(userId) {
   await deleteRows("renovacoes", userFilter);
   await deleteRows("categorias", userFilter);
   await deleteRows("tipos_conta", userFilter);
-  await deleteRowById("usuarios", userId);
+  await deleteUserById(userId);
 }
 
 async function deleteUser(userId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   if (userId === session) return showToast("Ação não permitida para o Master.");
   const user = db.users.find(item => item.id === userId);
   if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
@@ -5671,14 +6656,16 @@ async function deleteUser(userId) {
 }
 
 async function toggleUserBlock(userId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   if (userId === session) return showToast("Ação não permitida para o Master.");
   const user = db.users.find(item => item.id === userId);
   if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
   if (!await confirmAction()) return;
   user.blocked = !user.blocked;
   try {
-    await saveDatabase();
+    await updateUserFields(user.id, {
+      status: user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : daysUntilExpiry(user) <= 7 ? "vencendo" : "ativo"
+    });
     await refreshMasterData();
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
@@ -5688,23 +6675,76 @@ async function toggleUserBlock(userId) {
 }
 
 async function renewUser(userId) {
-  if (!isMaster()) return showToast("Acesso não autorizado.");
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
   const user = regularUsers().find(item => item.id === userId);
   if (!user) return;
   const newDate = await chooseRenewalDate(user);
   if (!newDate) return;
   if (!await confirmAction()) return;
+  const renewal = { id: crypto.randomUUID(), userId: user.id, date: dateOffset(), amount: Number(user.renewalPrice || 0), accessExpiresAt: newDate };
+  let userWriteConfirmed = false;
+  let userWriteAmbiguous = false;
+  let renewalWriteConfirmed = false;
+  let renewalWriteAmbiguous = false;
+
+  try {
+    await updateUserFields(user.id, { data_vencimento: newDate, status: "ativo" });
+    userWriteConfirmed = true;
+  } catch (error) {
+    if (!isRemoteWriteOutcomeUncertain(error)) return showToast("Não foi possível renovar o usuário.");
+    try {
+      const remoteUser = await loadUserById(user.id);
+      if (remoteUser?.accessExpiresAt === newDate && !remoteUser.blocked) userWriteConfirmed = true;
+      else userWriteAmbiguous = true;
+    } catch {
+      userWriteAmbiguous = true;
+    }
+  }
+
+  if (!userWriteConfirmed) {
+    if (userWriteAmbiguous) showToast("Não foi possível confirmar a renovação. Atualize a lista antes de tentar novamente.");
+    else showToast("Não foi possível renovar o usuário.");
+    return;
+  }
+
   user.accessExpiresAt = newDate;
   user.blocked = false;
-  db.renewals ||= [];
-  db.renewals.push({ id: crypto.randomUUID(), userId: user.id, date: dateOffset(), amount: Number(user.renewalPrice || 0), accessExpiresAt: newDate });
   try {
-    await saveDatabase();
+    await saveRenewalToSupabase(renewal);
+    renewalWriteConfirmed = true;
+  } catch (error) {
+    try {
+      const remoteRenewal = await loadRenewalById(renewal.id);
+      if (remoteRenewal?.id === renewal.id && remoteRenewal.usuario_id === user.id && remoteRenewal.nova_validade === newDate) {
+        renewalWriteConfirmed = true;
+      } else if (isRemoteWriteOutcomeUncertain(error)) {
+        renewalWriteAmbiguous = true;
+      }
+    } catch {
+      renewalWriteAmbiguous = true;
+    }
+  }
+
+  db.renewals ||= [];
+  if (renewalWriteConfirmed && !db.renewals.some(item => item.id === renewal.id)) db.renewals.push(renewal);
+
+  let refreshFailed = false;
+  try {
     await refreshMasterData();
   } catch (error) {
-    return showToast("Não foi possível salvar no Supabase.");
+    refreshFailed = true;
+    console.error("[MEU BOLSO][Supabase] erro ao recarregar renovação Master", error);
   }
-  showToast("Operação realizada com sucesso.");
+
+  if (!renewalWriteConfirmed) {
+    showToast(renewalWriteAmbiguous
+      ? "Validade atualizada, mas não foi possível confirmar o histórico. Atualize antes de tentar novamente."
+      : "Validade atualizada, mas não foi possível registrar o histórico da renovação. Atualize antes de tentar novamente.");
+  } else if (refreshFailed) {
+    showToast("Renovação concluída, mas não foi possível atualizar a lista. Atualize para confirmar os dados.");
+  } else {
+    showToast("Renovação realizada com sucesso.");
+  }
   render();
 }
 
@@ -5796,6 +6836,13 @@ async function saveCardPurchase(event) {
   const amount = parseMoney(data.get("amount"));
   const installments = Number(data.get("installments"));
   if (!Number.isFinite(amount) || amount <= 0 || installments < 1 || installments > 12) return showToast("Não foi possível concluir a operação.");
+  const status = data.get("status");
+  const requestedPaidInstallments = status === "paid"
+    ? installments === 1 ? 1 : Number(data.get("paidInstallmentsCount"))
+    : 0;
+  if (!Number.isInteger(requestedPaidInstallments) || requestedPaidInstallments < 0 || requestedPaidInstallments > installments) {
+    return showToast("Informe uma quantidade válida de parcelas já pagas.");
+  }
   if (!await confirmAction()) return;
   db.cardPurchases[session] ||= [];
   const values = {
@@ -5807,8 +6854,12 @@ async function saveCardPurchase(event) {
     category: data.get("category").trim(),
     paidInstallments: []
   };
-  const status = data.get("status");
-  const pendingValue = status === "paid" ? 0 : amount;
+  const existingPurchase = id ? db.cardPurchases[session].find(item => item.id === id) : null;
+  const preservedPaidCount = existingPurchase && status !== "paid" && !allInstallmentsPaid(existingPurchase)
+    ? Math.min((existingPurchase.paidInstallments || []).length, installments)
+    : 0;
+  const paidCountForLimit = status === "paid" ? requestedPaidInstallments : preservedPaidCount;
+  const pendingValue = (amount / installments) * (installments - paidCountForLimit);
   const cardLimit = Number(userCards().find(card => card.id === values.cardId)?.limit || 0);
   const currentPendingWithoutThis = pendingPurchaseTotal(values.cardId, id || null);
   if (pendingValue > Math.max(cardLimit - currentPendingWithoutThis, 0)) {
@@ -5817,14 +6868,15 @@ async function saveCardPurchase(event) {
   let savedPurchase;
   const wasEditingPurchase = Boolean(id);
   if (id) {
-    const purchase = db.cardPurchases[session].find(item => item.id === id);
+    const purchase = existingPurchase;
     if (!purchase) return showToast("Não foi possível concluir a operação.");
     const previousPaid = purchase.paidInstallments || [];
     const wasFullyPaid = allInstallmentsPaid(purchase);
     Object.assign(purchase, values);
     const validKeys = allInstallmentKeys(purchase);
     if (status === "paid") {
-      purchase.paidInstallments = validKeys;
+      purchase.paidInstallments = initialPaidInstallmentKeys(purchase, requestedPaidInstallments);
+      purchase.installmentPayments = Object.fromEntries(Object.entries(purchase.installmentPayments || {}).filter(([key]) => purchase.paidInstallments.includes(key)));
       ensureInstallmentPayments(purchase);
     } else {
       purchase.paidInstallments = wasFullyPaid ? [] : previousPaid.filter(key => validKeys.includes(key));
@@ -5836,7 +6888,7 @@ async function saveCardPurchase(event) {
   } else {
     const purchase = { id: crypto.randomUUID(), ...values };
     if (status === "paid") {
-      purchase.paidInstallments = allInstallmentKeys(purchase);
+      purchase.paidInstallments = initialPaidInstallmentKeys(purchase, requestedPaidInstallments);
       ensureInstallmentPayments(purchase);
     }
     db.cardPurchases[session].push(purchase);
@@ -5856,6 +6908,8 @@ async function saveCardPurchase(event) {
   purchaseFormOpen = false;
   editingPurchaseId = null;
   selectedCardId = savedPurchase.cardId;
+  cardPurchaseFilter = "pending";
+  cardPurchaseMonth = "";
   currentView = "cardPurchases";
   const purchaseCard = userCards().find(card => card.id === savedPurchase.cardId);
   logActivity(`${actionVerb(wasEditingPurchase, "Cadastrou compra", "Editou compra")} ${savedPurchase.name} no cartão ${purchaseCard?.name || "Cartão"}. Valor: ${money(savedPurchase.amount)}`);
@@ -5868,6 +6922,11 @@ function allInstallmentKeys(purchase) {
     const installmentNumber = index + 1;
     return `${monthKey(installmentDueDate(purchase, installmentNumber))}-${installmentNumber}`;
   });
+}
+
+function initialPaidInstallmentKeys(purchase, paidCount) {
+  const count = Math.min(Math.max(Number(paidCount) || 0, 0), Number(purchase.installments || 1));
+  return allInstallmentKeys(purchase).slice(0, count);
 }
 
 function ensureInstallmentPayments(purchase) {
@@ -6328,9 +7387,13 @@ async function payOverdueCardGroup(cardId) {
   render();
 }
 
-async function payCardInvoice(cardId) {
+async function payCardInvoice(cardId, options = {}) {
   if (isMaster()) return;
-  const group = payablesCardGroups().find(entry => entry.card.id === cardId);
+  const selectedCard = userCards().find(card => card.id === cardId);
+  const selectedItems = options.competence ? cardPendingInvoiceItems(cardId, options.competence) : null;
+  const group = options.competence
+    ? { card: selectedCard, items: selectedItems, total: selectedItems.reduce((sum, item) => sum + Number(item.amount || 0), 0) }
+    : payablesCardGroups().find(entry => entry.card.id === cardId);
   const pending = group?.items || [];
   const total = Number(group?.total || 0);
   if (!pending.length || total <= 0) return showToast("Não há fatura pendente para este cartão.");
@@ -6450,6 +7513,7 @@ async function securityDataHasConflict(property, column, value, userId) {
 async function saveSecurityData(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  if (!navigator.onLine) return setSecurityFormError("[data-security-data-error]", "Esta operação requer conexão com a internet.");
   const data = new FormData(form);
   const user = currentUser();
   if (!user) return;
@@ -6464,6 +7528,9 @@ async function saveSecurityData(event) {
   };
   if (values.name.length < 2) return setSecurityFormError("[data-security-data-error]", "Informe o nome corretamente.");
   if (!isValidEmail(values.email)) return setSecurityFormError("[data-security-data-error]", "Informe um e-mail válido, como usuario@dominio.com.");
+  if (user.authUserId && values.email !== String(user.email || "").toLocaleLowerCase("pt-BR")) {
+    return setSecurityFormError("[data-security-data-error]", "A alteração de e-mail Auth ficará disponível após a sincronização segura da conta.");
+  }
   if (!isValidBrazilianWhatsapp(values.whatsapp)) return setSecurityFormError("[data-security-data-error]", "Informe um WhatsApp brasileiro completo, como (74) 99137-5884.");
   values.whatsapp = formatBrazilianWhatsapp(values.whatsapp);
   if (!/^[a-z0-9._-]{3,30}$/i.test(values.username)) return setSecurityFormError("[data-security-data-error]", "Use de 3 a 30 caracteres no usuário: letras, números, ponto, hífen ou sublinhado.");
@@ -6485,7 +7552,15 @@ async function saveSecurityData(event) {
       }
     }
     const updatedUser = { ...user, ...values };
-    await upsertRows("usuarios", [userToSupabaseLike(updatedUser)]);
+    await updateUserFields(user.id, {
+      nome: updatedUser.name,
+      email: updatedUser.email,
+      whatsapp: updatedUser.whatsapp,
+      usuario: updatedUser.username,
+      endereco: updatedUser.address,
+      cidade: updatedUser.city,
+      estado: updatedUser.state
+    });
     Object.assign(user, updatedUser);
     saveSession(user);
     cacheDatabase();
@@ -6501,26 +7576,45 @@ async function saveSecurityData(event) {
 async function changePassword(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  if (!navigator.onLine) {
+    clearPasswordFields(form);
+    return setSecurityFormError("[data-security-password-error]", "Esta operação requer conexão com a internet.");
+  }
   const data = new FormData(form);
   const user = currentUser();
+  if (user?.authUserId) {
+    clearPasswordFields(form);
+    return setSecurityFormError("[data-security-password-error]", "A alteração de senha Auth ficará disponível após a sincronização segura da conta.");
+  }
   const currentPassword = String(data.get("currentPassword") || "");
   const newPassword = String(data.get("newPassword") || "");
   const confirmation = String(data.get("confirmPassword") || "");
-  if (currentPassword !== user.password) return setSecurityFormError("[data-security-password-error]", "A senha atual está incorreta.");
-  if (newPassword.length < 6) return setSecurityFormError("[data-security-password-error]", "A nova senha deve ter pelo menos 6 caracteres.");
-  if (newPassword === currentPassword) return setSecurityFormError("[data-security-password-error]", "A nova senha deve ser diferente da senha atual.");
-  if (newPassword !== confirmation) return setSecurityFormError("[data-security-password-error]", "A confirmação da nova senha não confere.");
+  if (newPassword.length < 6) {
+    clearPasswordFields(form);
+    return setSecurityFormError("[data-security-password-error]", "A nova senha deve ter pelo menos 6 caracteres.");
+  }
+  if (newPassword === currentPassword) {
+    clearPasswordFields(form);
+    return setSecurityFormError("[data-security-password-error]", "A nova senha deve ser diferente da senha atual.");
+  }
+  if (newPassword !== confirmation) {
+    clearPasswordFields(form);
+    return setSecurityFormError("[data-security-password-error]", "A confirmação da nova senha não confere.");
+  }
   setSecurityFormError("[data-security-password-error]", "");
   try {
-    const updatedUser = { ...user, password: newPassword };
-    await upsertRows("usuarios", [userToSupabaseLike(updatedUser)]);
-    user.password = newPassword;
-    cacheDatabase();
+    const validatedUser = await validateLegacyPassword(user.username, currentPassword);
+    if (!validatedUser || validatedUser.id !== user.id) {
+      clearPasswordFields(form);
+      return setSecurityFormError("[data-security-password-error]", "A senha atual está incorreta.");
+    }
+    await updateLegacyPassword(user.id, newPassword);
     closeSecurityPasswordDialog();
     render();
     showToast("Senha alterada com sucesso.");
   } catch (error) {
-    console.error("[MEU BOLSO][Segurança] erro ao alterar senha", error);
+    clearPasswordFields(form);
+    console.error("[MEU BOLSO][Segurança] erro ao alterar senha", error?.name || "PASSWORD_UPDATE_FAILED");
     setSecurityFormError("[data-security-password-error]", "Não foi possível salvar a nova senha no Supabase.");
   }
 }
@@ -6658,10 +7752,11 @@ function resetUserFilters() {
   userStatusFilter = "all";
   userExpiryFilter = "";
   userPeriodFilter = "all";
+  userFiltersOpen = false;
 }
 
 function exportPdf() {
-  if (!isMaster()) return;
+  if (!canUseMasterContext()) return;
   ensureIndividualReportUser();
   const items = filteredReportTransactions();
   const summary = totals(items);
@@ -6674,7 +7769,7 @@ function exportPdf() {
 }
 
 function exportExcel() {
-  if (!isMaster()) return;
+  if (!canUseMasterContext()) return;
   ensureIndividualReportUser();
   const items = filteredReportTransactions();
   const owner = regularUsers().find(user => user.id === reportUserId)?.name;
@@ -6751,32 +7846,69 @@ function confirmAction() {
 async function initializeApp() {
   isBooting = true;
   lastSyncError = "";
+  sanitizeStoredDatabaseCache();
+  offlineQueue();
   render();
   try {
     if (session) {
-      const user = await loadUserById(session);
+      let user;
+      if (sessionMode === AUTH_SESSION_MODE) {
+        if (!AUTH_DUAL_LOGIN_ENABLED || !supabaseAuthClient || !sessionAuthUserId) {
+          clearSession();
+          db = emptyDatabase();
+          authView = "login";
+          return;
+        }
+        const { data: authSessionData, error: authSessionError } = await supabaseAuthClient.auth.getSession();
+        const authSession = authSessionData?.session;
+        if (authSessionError || !authSession || authSession.user?.id !== sessionAuthUserId) {
+          await supabaseAuthClient.auth.signOut({ scope: "local" });
+          clearSession();
+          db = emptyDatabase();
+          authView = "login";
+          return;
+        }
+        if (navigator.onLine) {
+          const { data: authUserData, error: authUserError } = await supabaseAuthClient.auth.getUser();
+          if (authUserError || authUserData?.user?.id !== sessionAuthUserId) {
+            await supabaseAuthClient.auth.signOut({ scope: "local" });
+            clearSession();
+            db = emptyDatabase();
+            authView = "login";
+            return;
+          }
+        }
+        user = await loadUserByAuthId(sessionAuthUserId);
+        if (user && user.id !== session) {
+          await supabaseAuthClient.auth.signOut({ scope: "local" });
+          clearSession();
+          db = emptyDatabase();
+          authView = "login";
+          return;
+        }
+      } else {
+        user = await loadUserById(session);
+      }
       if (user) {
         if (isAccessBlocked(user)) {
+          if (sessionMode === AUTH_SESSION_MODE) await supabaseAuthClient?.auth.signOut();
           clearSession();
           db = await loadDatabase();
           authView = "login";
           return;
         }
-        saveSession(user);
-        if (user.role === "master") {
-          db = await loadScopedDatabase(user);
-        } else {
-          db = normalizeDatabase(fromSupabaseRows({ usuarios: [userToSupabaseLike(user)], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
-          await refreshUserFinancialData();
-        }
+        viewMode = normalizeViewModeForUser(user, initialSavedSession?.viewMode || (user.role === "master" ? MASTER_VIEW_MODE : USER_VIEW_MODE));
+        saveSession(user, { mode: sessionMode, authUserId: sessionAuthUserId, requestedViewMode: viewMode });
+        await loadScopedDatabase(user);
       } else {
+        if (sessionMode === AUTH_SESSION_MODE) await supabaseAuthClient?.auth.signOut();
         clearSession();
         db = await loadDatabase();
       }
     } else {
       db = await loadDatabase();
     }
-    if (session && !currentUser()) {
+    if (session && !currentUser() && !hasActiveDatabaseLoadForCurrentContext()) {
       clearSession();
     }
   } catch (error) {
@@ -6793,6 +7925,7 @@ async function initializeApp() {
   } finally {
     isBooting = false;
     render();
+    notifyRemovedSensitiveOfflineOperations();
   }
 }
 

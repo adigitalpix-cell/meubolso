@@ -510,10 +510,20 @@ button { cursor: pointer; }
 .card-purchases-total small { display: block; color: #c5d8d1; font-size: 8px; font-weight: 800; }
 .card-purchases-total strong { display: block; margin-top: 4px; color: var(--lime); font-size: 18px; font-weight: 950; white-space: nowrap; }
 .card-purchase-section { min-width: 0; display: grid; gap: 8px; }
-.card-purchase-section > header { padding: 0 4px; display: flex; align-items: center; gap: 9px; }
+.card-purchase-section > header { padding: 0 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px 9px; }
 .card-purchase-section > header h3 { margin: 0; color: #244f40; font-size: 11px; font-weight: 950; letter-spacing: .35px; text-transform: uppercase; }
-.card-purchase-section > header::after { content: ""; height: 1px; flex: 1; background: #dce7e2; }
+.card-purchase-section > header::after { content: ""; height: 1px; min-width: 8px; flex: 1; background: #dce7e2; }
 .card-purchase-section > header span { order: 2; min-width: 23px; padding: 4px 7px; border-radius: 999px; color: #15563f; background: #e7f3ed; font-size: 9px; font-weight: 900; text-align: center; }
+.card-purchase-filter-controls { order: 1; display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.card-purchase-filter-controls select,
+.card-purchase-filter-controls input,
+.card-purchase-filter-controls button { min-height: 30px; border: 1px solid #d6e4dd; border-radius: 10px; color: #345449; background: #fff; font-size: 9px; font-weight: 800; }
+.card-purchase-filter-controls select { max-width: 112px; padding: 0 25px 0 9px; }
+.card-purchase-filter-controls input { width: 112px; padding: 0 7px; }
+.card-purchase-filter-controls button { padding: 0 8px; color: #0b6548; background: #eff8f2; }
+.card-purchase-filter-controls select:focus,
+.card-purchase-filter-controls input:focus,
+.card-purchase-filter-controls button:focus-visible { border-color: #4eb979; outline: 2px solid rgba(78,185,121,.14); }
 .card-purchase-list { min-width: 0; display: grid; gap: 7px; }
 .card-purchases-empty { padding: 18px 12px; border: 1px dashed #d9e6df; border-radius: 15px; color: #687871; background: #f3f7f5; font-size: 11px; text-align: center; }
 .card-purchase-card {
@@ -554,6 +564,8 @@ button { cursor: pointer; }
   .card-purchase-value { min-width: 70px; }
   .card-purchase-value strong { font-size: 12px; }
   .card-purchase-actions .receive-compact-action { padding-inline: 8px; }
+  .card-purchase-filter-controls { width: 100%; order: 3; }
+  .card-purchase-filter-controls select { margin-left: auto; }
 }
 
 /* Histórico de parcelas · MB C2 */
@@ -694,19 +706,6 @@ button { cursor: pointer; }
 .row-actions button { min-height: 32px; border: 0; border-radius: 9px; color: var(--green); background: var(--green-soft); font-size: 9px; font-weight: 800; }
 .row-actions button.invoice-action { color: var(--card-blue); background: var(--card-blue-soft); }
 .row-actions button.danger { color: var(--red); background: var(--red-soft); }
-.installment-row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
-.installment-row-actions button { min-height: 32px; padding: 6px 8px; }
-.installment-row-actions .edit-installment-date-button { border: 1px solid #cfe3d9; color: #155d44; background: #f3f8f5; }
-.installment-date-dialog form { display: grid; gap: 14px; }
-.installment-date-summary { padding: 12px; display: grid; gap: 4px; border: 1px solid #d8e8df; border-radius: 14px; background: linear-gradient(135deg,#f2faf5,#eaf5ef); }
-.installment-date-summary strong { color: var(--green-dark); font-size: 14px; }
-.installment-date-summary span { color: #26644f; font-size: 11px; font-weight: 850; }
-.installment-date-summary small { color: var(--muted); font-size: 10px; }
-.installment-date-summary small b { color: var(--green); }
-.installment-date-dialog .confirm-actions { margin-top: 1px; }
-@media (max-width: 360px) {
-  .installment-row-actions { grid-template-columns: 1fr; }
-}
 .due-list { display: grid; gap: 8px; }
 .due-row { padding: 12px; display: grid; grid-template-columns: 1fr auto; gap: 6px; border-radius: 14px; background: white; border: 1px solid var(--line); }
 .due-row strong, .due-row span, .due-row small { display: block; }
@@ -789,6 +788,13 @@ button { cursor: pointer; }
 .profile-card h2 { margin: 0 0 4px; }
 .profile-card p { margin: 0; color: var(--muted); font-size: 12px; }
 .access-date { margin-top: 14px; padding: 10px; border-radius: 11px; color: var(--green); background: var(--green-soft); font-size: 11px; }
+.profile-context-switch { margin-top: 14px; padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+.profile-context-switch > .eyebrow { color: var(--green); }
+.profile-context-options { margin: 9px 0 8px; padding: 4px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; border-radius: 13px; background: #edf3ef; }
+.profile-context-options button { min-width: 0; min-height: 39px; padding: 7px 8px; border: 0; border-radius: 10px; color: #64766f; background: transparent; font-size: 9px; font-weight: 950; letter-spacing: .035em; }
+.profile-context-options button.active { color: #d8ff69; background: linear-gradient(135deg,#0b6246,#043a2c); box-shadow: 0 6px 14px rgba(7,71,50,.18); }
+.profile-context-options button:disabled { opacity: 1; cursor: default; }
+.profile-context-switch > small { display: block; color: var(--muted); font-size: 9px; font-weight: 700; line-height: 1.4; }
 .app-version-card { margin-top: 14px; padding: 16px; border-radius: 18px; background: white; border: 1px solid var(--line); }
 .app-version-card span, .app-version-card small { display: block; color: var(--muted); font-size: 10px; font-weight: 700; }
 .app-version-card h2 { margin: 5px 0 2px; font-size: 17px; }
@@ -843,12 +849,29 @@ button { cursor: pointer; }
 .menu-item.danger { color: var(--red); }
 .admin-form { padding: 18px; margin-bottom: 18px; border-radius: 20px; background: white; }
 .admin-form h2 { margin: 0 0 15px; font-size: 17px; }
+.user-create-page { display: grid; gap: 14px; padding-top: 20px; }
+.user-create-back { margin-bottom: 0; }
+.user-create-form { width: 100%; max-width: 620px; margin: 0 auto; border: 1px solid var(--line); box-shadow: 0 12px 28px rgba(17,47,39,.08); }
 .new-user-button { width: 100%; min-height: 52px; margin-bottom: 18px; border: 1px dashed #98b8ac; border-radius: 16px; color: var(--green); background: #f9fcfa; font-size: 12px; font-weight: 900; letter-spacing: .4px; }
 .user-filter-panel { padding: 14px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+.users-filter-panel { padding: 10px; }
+.user-filter-bar { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: stretch; gap: 8px; }
 .search-field { min-height: 45px; padding: 0 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 12px; background: #fafbf8; }
 .search-field span { color: var(--green); font-size: 20px; }
-.search-field input { width: 100%; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; }
+.search-field input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; }
+.user-filter-toggle { min-width: 82px; min-height: 45px; padding: 0 10px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #b9d3c8; border-radius: 12px; color: var(--green); background: var(--green-soft); font-size: 10px; font-weight: 900; }
+.user-filter-toggle b { min-width: 17px; height: 17px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--green); font-size: 8px; }
+.user-filter-toggle i { font-size: 15px; font-style: normal; line-height: 1; }
+.user-advanced-filters { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); }
+@media (max-width: 360px) {
+  .users-filter-panel { padding: 8px; }
+  .user-filter-bar { gap: 6px; }
+  .user-filter-toggle { min-width: 74px; padding-inline: 8px; }
+  .users-filter-panel .search-field { padding-inline: 9px; }
+  .users-filter-panel .search-field input { font-size: 11px; }
+}
 .user-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.user-advanced-filters .user-filter-grid { margin-top: 0; }
 .user-filter-grid label, .filter-date { display: grid; gap: 6px; }
 .user-filter-grid label > span, .filter-date > span { color: var(--muted); font-size: 9px; font-weight: 800; }
 .user-filter-grid select, .filter-date input { width: 100%; min-width: 0; height: 40px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; outline: 0; color: var(--ink); background: #fafbf8; font-size: 10px; }
@@ -894,6 +917,13 @@ button { cursor: pointer; }
 .support-reply b { display: block; color: var(--green); font-size: 11px; }
 .support-reply p { margin: 6px 0; }
 .reply-form { margin-top: 10px; padding: 12px; border-radius: 14px; background: var(--paper); }
+
+@media (min-width: 700px) {
+  .user-create-form { padding: 24px; }
+  .user-advanced-filters { display: grid; grid-template-columns: minmax(0,2fr) minmax(160px,1fr) auto; align-items: end; gap: 8px; }
+  .user-advanced-filters .filter-date, .user-advanced-filters .clear-filters { margin-top: 0; }
+  .user-advanced-filters .clear-filters { width: auto; min-height: 40px; padding-inline: 14px; }
+}
 
 .report-filters { padding: 16px; margin-bottom: 14px; border-radius: 19px; background: white; }
 .period-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin-bottom: 15px; border-radius: 12px; background: var(--paper); }
@@ -1663,6 +1693,8 @@ body:has(#card-dialog[open]) { overflow: hidden; }
 .purchase-installment-value { min-width: 0; padding: 0 4px 8px; }
 .purchase-installment-value span { display: block; color: #566a60; font-size: .68rem; font-weight: 760; }
 .purchase-installment-value strong { display: block; margin-top: 7px; color: #086146; font-size: 1rem; font-weight: 900; white-space: nowrap; }
+.purchase-paid-installments-field { grid-column: 1 / -1; }
+.purchase-paid-installments-field[hidden] { display: none; }
 
 @media (max-width: 380px) {
   .purchase-sheet .static-field { padding-inline: 8px; font-size: .59rem; }

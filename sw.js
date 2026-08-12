@@ -1,9 +1,10 @@
-const CACHE_NAME = "meu-bolso-v0.68.0";
+const CACHE_NAME = "meu-bolso-v0.68.1";
 const ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
-  "/app.js",
+  "/app.js?v=0.68.1",
+  "/vendor/supabase-js-2.112.2.min.js",
   "/supabase-config.js",
   "/manifest.webmanifest",
   "/icon-192.png",
@@ -32,11 +33,15 @@ self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
+    fetch(event.request).then(response => {
       const copy = response.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
       return response;
-    }).catch(() => caches.match("/").then(hit => hit || caches.match("/index.html"))))
+    }).catch(() => caches.match(event.request).then(cached => {
+      if (cached) return cached;
+      if (event.request.mode === "navigate") return caches.match("/").then(hit => hit || caches.match("/index.html"));
+      return Response.error();
+    }))
   );
 });
 
