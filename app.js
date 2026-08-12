@@ -2165,8 +2165,19 @@ function cardInstallmentItems(userId = session) {
   });
 }
 
-function cardInvoiceTargetMonth(cardId) {
+function cardScheduledInvoiceMonth(cardId) {
   return cardId ? monthKey(invoiceClosingDate(cardId)) : monthKey();
+}
+
+function cardInvoiceTargetMonth(cardId, userId = session) {
+  const scheduledCompetence = cardScheduledInvoiceMonth(cardId);
+  if (!cardId) return scheduledCompetence;
+  const purchasesById = new Map(userCardPurchases(userId).map(purchase => [purchase.id, purchase]));
+  const pendingCompetences = cardInstallmentItems(userId)
+    .filter(item => purchasesById.get(item.sourcePurchaseId)?.cardId === cardId && !isPaidStatus(item))
+    .map(dueMonthKey)
+    .sort();
+  return pendingCompetences[0] || scheduledCompetence;
 }
 
 function shiftMonthKey(competence, offset) {
@@ -2184,7 +2195,7 @@ function cardDueDateForCompetence(card, competence) {
 }
 
 function initialPurchaseInstallmentDate(card, paidInstallmentsCount = 0) {
-  const currentCompetence = cardInvoiceTargetMonth(card?.id);
+  const currentCompetence = cardScheduledInvoiceMonth(card?.id);
   return cardDueDateForCompetence(card, shiftMonthKey(currentCompetence, -Math.max(Number(paidInstallmentsCount) || 0, 0)));
 }
 
@@ -2220,12 +2231,17 @@ function cardPendingInvoiceItems(cardId = null, targetMonth = null, userId = ses
 function cardInvoiceCycleDates(card, competence) {
   const [year, monthNumber] = String(competence || "").split("-").map(Number);
   if (!year || !monthNumber) return { closingDate: "", dueDate: "" };
-  const closingDay = Math.min(Number(card?.closingDay || 1), daysInMonth(year, monthNumber - 1));
-  const closing = new Date(year, monthNumber - 1, closingDay, 12);
-  const dueMonthOffset = Number(card?.dueDay || 1) < Number(card?.closingDay || 1) ? 1 : 0;
-  const dueMonth = new Date(year, monthNumber - 1 + dueMonthOffset, 1, 12);
-  const dueDay = Math.min(Number(card?.dueDay || 1), daysInMonth(dueMonth.getFullYear(), dueMonth.getMonth()));
-  const due = new Date(dueMonth.getFullYear(), dueMonth.getMonth(), dueDay, 12);
+  const closingDay = Number(card?.closingDay || 1);
+  const dueDay = Number(card?.dueDay || 1);
+  const closingMonthOffset = closingDay > dueDay ? -1 : 0;
+  const closingMonth = new Date(year, monthNumber - 1 + closingMonthOffset, 1, 12);
+  const closing = new Date(
+    closingMonth.getFullYear(),
+    closingMonth.getMonth(),
+    Math.min(closingDay, daysInMonth(closingMonth.getFullYear(), closingMonth.getMonth())),
+    12
+  );
+  const due = new Date(year, monthNumber - 1, Math.min(dueDay, daysInMonth(year, monthNumber - 1)), 12);
   return { closingDate: localDateKey(closing), dueDate: localDateKey(due) };
 }
 
@@ -2248,25 +2264,8 @@ function cardInvoiceNotificationStates(today = dateOffset()) {
   });
 }
 
-function cardCurrentInvoiceCycleDates(card, today = dateOffset()) {
-  const current = new Date(`${today}T12:00:00`);
-  const closingDay = Number(card?.closingDay || 1);
-  const dueDay = Number(card?.dueDay || 1);
-  const closingMonthOffset = closingDay > dueDay ? -1 : 0;
-  const closingMonth = new Date(current.getFullYear(), current.getMonth() + closingMonthOffset, 1, 12);
-  const closingDate = new Date(
-    closingMonth.getFullYear(),
-    closingMonth.getMonth(),
-    Math.min(closingDay, daysInMonth(closingMonth.getFullYear(), closingMonth.getMonth())),
-    12
-  );
-  const dueDate = new Date(
-    current.getFullYear(),
-    current.getMonth(),
-    Math.min(dueDay, daysInMonth(current.getFullYear(), current.getMonth())),
-    12
-  );
-  return { closingDate: localDateKey(closingDate), dueDate: localDateKey(dueDate) };
+function cardCurrentInvoiceCycleDates(card) {
+  return cardInvoiceCycleDates(card, cardInvoiceTargetMonth(card?.id));
 }
 
 function cardCurrentInvoiceNotificationStates(today = dateOffset()) {
@@ -3154,19 +3153,23 @@ function payablesCardGroups() {
 
 function payablesCardGroupTemplate(group) {
   const registeredCard = group.context === "registered";
-  const expanded = registeredCard ? expandedRegisteredCardId === group.card.id : payablesExpandedCardIds.has(group.card.id);
   const count = group.items.length;
   const invoiceStatus = registeredCard ? cardInvoiceGroupStatus(group) : "";
   const invoiceInTime = registeredCard && !invoiceStatus.startsWith("Vencida");
   const invoiceOverdue = registeredCard && invoiceStatus.startsWith("Vencida");
-  const payButton = group.total > 0
+  const registeredInvoiceIsCurrent = registeredCard && cardInvoiceTargetMonth(group.card.id) === monthKey();
+  const registeredInvoiceCanInteract = registeredCard && group.total > 0 && count > 0 && (registeredInvoiceIsCurrent || invoiceOverdue);
+  const expanded = registeredCard ? registeredInvoiceCanInteract && expandedRegisteredCardId === group.card.id : payablesExpandedCardIds.has(group.card.id);
+  const payButton = group.total > 0 && (!registeredCard || registeredInvoiceCanInteract)
     ? `<button type="button" class="payable-pay-button" ${registeredCard ? "data-pay-invoice" : "data-pay-payables-card"}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 10 4 4 8-9"/></svg><span>${registeredCard ? "Pagar Fatura" : "Pagar"}</span></button>`
     : "";
   const optionsMenu = registeredCard
     ? `<details class="receivable-options payable-options"><summary aria-label="Mais opções de ${escapeAttribute(group.card.name)}"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button type="button" data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir Compras</button><button type="button" data-edit-card="${escapeAttribute(group.card.id)}">Editar</button><button type="button" class="danger" data-delete-card="${escapeAttribute(group.card.id)}">Excluir</button></div></details>`
     : `<details class="receivable-options payable-options"><summary aria-label="Mais opções do cartão"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="1.2"/><circle cx="10" cy="10" r="1.2"/><circle cx="10" cy="16" r="1.2"/></svg></summary><div><button data-open-card-purchases="${escapeAttribute(group.card.id)}">Abrir em Cartões</button></div></details>`;
   const toggleAttribute = registeredCard ? "data-toggle-registered-card" : "data-toggle-payables-card";
-  const toggleButton = `<button type="button" class="payables-toggle-card" ${toggleAttribute}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? (registeredCard ? "Ocultar compras" : "Ocultar parcelas") : (registeredCard ? "Ver compras" : "Ver parcelas")}</span></button>`;
+  const toggleButton = !registeredCard || registeredInvoiceCanInteract
+    ? `<button type="button" class="payables-toggle-card" ${toggleAttribute}="${escapeAttribute(group.card.id)}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg><span>${expanded ? (registeredCard ? "Ocultar compras" : "Ocultar parcelas") : (registeredCard ? "Ver compras" : "Ver parcelas")}</span></button>`
+    : "";
   return `
     <article class="payables-card-group ${registeredCard ? "registered-card-context" : ""} ${invoiceInTime ? "invoice-in-time" : ""} ${invoiceOverdue ? "invoice-overdue" : ""} ${expanded ? "expanded" : ""}">
       <div class="payables-card-summary">
@@ -4466,8 +4469,7 @@ function cardRow(card, invoiceGroup) {
 }
 
 function cardInvoiceDueDate(card) {
-  const today = new Date(`${dateOffset()}T12:00:00`);
-  return localDateKey(new Date(today.getFullYear(), today.getMonth(), Math.min(Number(card.dueDay || 1), daysInMonth(today.getFullYear(), today.getMonth())), 12));
+  return cardDueDateForCompetence(card, cardInvoiceTargetMonth(card?.id));
 }
 
 function cardAccentClass(card) {
@@ -4521,7 +4523,7 @@ function installmentDueDate(purchase, installmentNumber) {
 function purchaseInstallmentPreviewRows(purchase, card, paidCount = 0) {
   const total = Math.max(Number(purchase?.installments || 1), 1);
   const amount = Number(purchase?.amount || 0);
-  const currentCompetence = cardInvoiceTargetMonth(card?.id);
+  const currentCompetence = cardScheduledInvoiceMonth(card?.id);
   const normalizedPaidCount = Math.min(Math.max(Number(paidCount) || 0, 0), total);
   let nextFutureAssigned = false;
   return Array.from({ length: total }, (_, index) => {

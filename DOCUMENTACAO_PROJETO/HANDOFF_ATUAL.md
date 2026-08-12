@@ -10,11 +10,11 @@ Método operacional oficial: `METODO_OFICIAL_DE_TRABALHO.md`. Ele estabelece res
 
 Servidor local oficial permanente: `http://127.0.0.1:4178/`, servindo `C:\Projetos\meubolso`. Não usar `file://` nem criar nova porta por rodada. Antes de testar, comprovar que os arquivos HTTP correspondem ao worktree atual, preservando localStorage, sessão e cache útil.
 
-## Estado da release 0.68.2
+## Estado da release 0.68.3
 
-- BUG-008, BUG-009 e BUG-010 homologados integram a release `0.68.2`.
-- Recurso: `/app.js?v=0.68.2`.
-- Cache PWA: `meu-bolso-v0.68.2`.
+- BUG-011 e seus residuais homologados integram a release `0.68.3`; BUG-008, BUG-009 e BUG-010 permanecem preservados.
+- Recurso: `/app.js?v=0.68.3`.
+- Cache PWA: `meu-bolso-v0.68.3`.
 - Banco, Auth, RLS e policies permanecem inalterados pela release.
 
 ## Histórico da release 0.68.1
@@ -132,11 +132,11 @@ Saldo de créditos, nome de ZIP utilizado/gerado e estado operacional de cada en
 
 ## Versionamento técnico
 
-- Versão publicada: `0.68.2`.
-- Recurso em produção: `/app.js?v=0.68.2`.
-- Cache em produção: `meu-bolso-v0.68.2`.
+- Versão publicada: `0.68.3`.
+- Recurso em produção: `/app.js?v=0.68.3`.
+- Cache em produção: `meu-bolso-v0.68.3`.
 - Estratégia PWA: network-first; caches antigos são removidos na ativação. Uma PWA já aberta pode precisar ser fechada e aberta uma vez, sem limpeza manual de cache em condições normais.
 
 ## Próxima ação
 
-O proprietário deve validar rapidamente a produção `0.68.2` e enviar o resultado ao ChatGPT para revisão final. Não iniciar BUG-011 automaticamente.
+O BUG-011 e os residuais foram homologados e publicados na release `0.68.3`. A próxima frente deve ser escolhida pelo proprietário; não iniciar BUG-012 automaticamente.

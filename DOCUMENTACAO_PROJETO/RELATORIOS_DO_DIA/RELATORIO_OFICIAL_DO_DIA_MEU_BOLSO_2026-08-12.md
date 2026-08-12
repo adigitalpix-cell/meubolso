@@ -112,3 +112,33 @@ Status oficial: **BUG-010 HOMOLOGADO PELO PROPRIETÁRIO EM 12/08/2026**.
 BUG-008, BUG-009 e BUG-010 homologados foram consolidados na release `0.68.2`. O aplicativo exibe `0.68.2`, o recurso JavaScript usa `/app.js?v=0.68.2` e o cache PWA usa `meu-bolso-v0.68.2`, preservando network-first e a remoção de caches antigos na ativação.
 
 A release não altera banco, schema, Auth, RLS ou policies e não inclui segredo, mock, backup, dump ou migration não relacionada.
+
+## BUG-011 — competência da fatura paga
+
+O cenário Mercado Pago foi reproduzido com data de referência 12/08/2026. `cardInvoiceTargetMonth()` e `dueMonthKey()` já colocavam as parcelas de 07/09 na competência `2026-09`, mas `cardInvoiceGroupStatus()` recebia de `cardInvoiceDueDate()` o vencimento artificial 07/08, montado pelo mês civil corrente. A mesma divergência existia na fonte visual de notificações. A fatura paga de agosto, com pendência zero, não permanecia na coleção ativa.
+
+A correção separou a competência programada usada pela criação/prévia da competência pendente ativa e passou a derivar fechamento, vencimento e status da mesma competência. Não houve alteração das datas corretas do Histórico de Parcelas.
+
+Foram aprovadas 21 verificações controladas, cobrindo os 17 casos obrigatórios, BUG-008, resumo=detalhe, notificações, viradas de mês/ano, total zero e filtro por mês. O cenário equivalente ao print resultou em competência `2026-09`, vencimento 07/09/2026, status não vencido e R$ 278,80 para os três valores informados. A diferença observada de R$ 0,01 permanece indeterminada e fora do escopo.
+
+`node --check app.js`, `node --check sw.js` e `git diff --check` passaram. O servidor 4178 entrega o `app.js` do worktree e não registrou erro crítico no carregamento. Banco, schema, Auth, RLS, policies e produção não foram alterados; não houve commit, push ou deploy.
+
+Status: **IMPLEMENTADO / TESTADO ESTRUTURALMENTE / HOMOLOGAÇÃO MANUAL PENDENTE**.
+
+### Residual de visibilidade de fatura futura
+
+O valor R$ 278,79, a competência setembro e o status `Vence em 26 dias` foram parcialmente aprovados pelo proprietário, mas o card ainda expunha antecipadamente Pagar Fatura, Ver/Ocultar compras e a lista de setembro. `payablesCardGroupTemplate()` não comparava a competência: pagamento dependia apenas do total, e expansão apenas do estado global. O bloco era idêntico antes da correção principal, portanto o residual não foi introduzido pelo diff do BUG-011.
+
+Foi adicionada uma guarda mínima de `AAAA-MM` somente para ações e detalhes. Valor e status permanecem informativos; as ações aparecem ao entrar na competência. Quatorze verificações controladas passaram, incluindo agosto→setembro, fatura paga, dezembro→janeiro e total zero. A homologação manual do BUG-011 continua pendente.
+
+### BUG-011 residual 2 — ações por estado e alinhamento do menu
+
+O teste manual mostrou que a guarda por competência ocultava incorretamente ações do Nubank vencido, enquanto o Neon zerado ainda podia exibir Ver compras. A remoção do botão intermediário também retirava o elemento com `margin-left:auto`, deslocando o menu ⋮.
+
+A matriz foi refinada no mesmo componente: vencida ou atual com saldo e itens permite pagamento/expansão; futura não permite; zero ou sem itens não cria expansão vazia. O menu recebeu alinhamento próprio à direita, com preservação do agrupamento quando Ver/Ocultar existe. Quinze verificações controladas passaram, incluindo virada de ano e total/detalhe. Nesse ponto da execução, o BUG-011 aguardava a homologação manual registrada na seção seguinte.
+
+### Homologação e release 0.68.3
+
+O proprietário homologou o BUG-011 e seus dois residuais. Foram aprovados manualmente: Nubank vencido com saldo e ações disponíveis; Caixa futura com valor/status e sem ações antecipadas; Neon zerado sem expansão; e menu ⋮ à direita em todos os estados.
+
+A correção homologada foi preparada para publicação na release `0.68.3`, com `/app.js?v=0.68.3`, manifesto `0.68.3` e cache `meu-bolso-v0.68.3`. A estratégia network-first inline e a remoção de caches antigos foram preservadas. Banco, Auth, RLS e policies não integram a release.

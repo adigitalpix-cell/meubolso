@@ -1220,7 +1220,8 @@ button { cursor: pointer; }
 .registered-card-context.invoice-overdue .payables-installment-row > b,
 .registered-card-context.invoice-overdue .payables-installment-total strong { color: #c82735; }
 .registered-card-context .payables-card-actions { display: flex; flex-wrap: nowrap; }
-.registered-card-context .payable-options { margin-left: 0; flex: 0 0 32px; }
+.registered-card-context .payable-options { margin-left: auto; flex: 0 0 32px; }
+.registered-card-context .payables-toggle-card + .payable-options { margin-left: 0; }
 .payables-installment-list { max-height: 282px; padding: 5px 9px; display: grid; overflow-y: auto; overscroll-behavior: contain; border: 1px solid #eee5e5; border-radius: 15px; background: #fffafa; scrollbar-width: thin; scrollbar-color: #e5aeb4 transparent; }
 .payables-installment-list::-webkit-scrollbar { width: 5px; }
 .payables-installment-list::-webkit-scrollbar-thumb { border-radius: 99px; background: #e5aeb4; }

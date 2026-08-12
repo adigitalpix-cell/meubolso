@@ -7,10 +7,10 @@
 | Data | 2026-08-12 |
 | Pasta | `C:\Projetos\meubolso` |
 | Branch | `develop` |
-| HEAD atual (`develop` e `main`) | commit único da release `0.68.2` |
-| Release em produção | `0.68.2` |
-| Recurso JavaScript | `/app.js?v=0.68.2` |
-| Cache PWA | `meu-bolso-v0.68.2` |
+| HEAD atual (`develop` e `main`) | commit único da release `0.68.3` |
+| Release em produção | `0.68.3` |
+| Recurso JavaScript | `/app.js?v=0.68.3` |
+| Cache PWA | `meu-bolso-v0.68.3` |
 | Runtime publicado | Produção `hdldbvexlxsbboaxwrut` |
 | URL de produção | `https://meubolso2.vercel.app` |
 
@@ -90,6 +90,8 @@ Essas contagens são da baseline de 2026-08-08, não uma consulta em tempo real.
 - BUG-008 foi reproduzido, corrigido e homologado pelo proprietário: parcelas já pagas recuam a partir da competência oficial, usam o vencimento real do cartão e compartilham o mesmo cronograma entre prévia e persistência. Os cenários com vencimentos nos dias 07 e 21 e os estados PAGO/FATURA ATUAL/PRÓXIMA/PENDENTE foram aprovados.
 - BUG-009 foi reproduzido, corrigido e homologado pelo proprietário: receitas mensais possuem identidade estável, edição/exclusão afetam somente a competência atual e futuras, o encerramento persiste em `receitas.recorrencia`, refresh/reload preservam o estado e o histórico anterior permanece intacto.
 - BUG-010 foi reproduzido e implementado localmente: Nova Receita, Nova Despesa e Nova Compra usam rascunho automático em `localStorage`, isolado pelo UUID financeiro e pelo tipo de formulário. Fechar, navegar, atualizar ou reabrir preserva; sucesso limpa; falha e cancelamento simples preservam; descarte explícito limpa após confirmação. Passou em 20/20 testes estruturais e aguarda homologação manual.
+- BUG-011 foi reproduzido, corrigido e homologado pelo proprietário: competência, vencimento e fechamento usam o mesmo ciclo; 21 verificações principais passaram. A correção integra a release `0.68.3`.
+- O residual 2 do BUG-011 refinou a visibilidade por estado + saldo + itens: faturas vencidas ou atuais com pendência e itens mantêm ações; futuras mostram somente valor/status/menu; cartões zerados não mostram expansão vazia. O menu ⋮ permanece à direita em todos os estados. Quinze verificações adicionais passaram.
 
 ## Git e produção
 
@@ -125,6 +127,7 @@ Essas contagens são da baseline de 2026-08-08, não uma consulta em tempo real.
 - Release `0.68.2` consolida BUG-008, BUG-009 e BUG-010 homologados; versionamento de app, recurso e cache PWA foi atualizado de forma determinística.
 - BUG-004 foi homologado pelo proprietário em 12/08/2026. Nubank apareceu uma única vez como fatura vencida e com R$ 262,50 nas duas telas; Caixa permaneceu como fatura fechada em R$ 62,50, vencendo em 17/08/2026. Competência, total atual e ausência de estado histórico concorrente foram aprovados.
 - UX filtro Compras do Cartão: HOMOLOGADA PELO PROPRIETÁRIO.
+- BUG-011 e seus dois residuais foram homologados e publicados na release `0.68.3`.
 - RLS não pode ser ativada enquanto os fluxos não estiverem prontos.
 - Como padrão, correções financeiras devem permanecer separadas da fundação de segurança; o proprietário pode alterar a prioridade e autorizar escopo combinado se tecnicamente seguro.
 

@@ -2,7 +2,7 @@
 
 ## Ponto atual
 
-A release `0.68.2` consolida os BUG-008, BUG-009 e BUG-010 homologados, com `/app.js?v=0.68.2` e cache `meu-bolso-v0.68.2`.
+A release `0.68.3` publica o BUG-011 e seus dois residuais homologados, preservando BUG-003, BUG-004, BUG-008, BUG-009 e BUG-010. O recurso é `/app.js?v=0.68.3` e o cache é `meu-bolso-v0.68.3`.
 
 A release `0.68.1` está publicada em produção no commit `3bab0ff1afaadadd0cece225f57a42b3a429c485`. `develop` e `main` estão sincronizadas, o deploy Vercel foi concluído e a produção serve `/app.js?v=0.68.1` com cache `meu-bolso-v0.68.1`.
 
@@ -49,6 +49,6 @@ Homologado pelo proprietário em 12/08/2026. Nubank apareceu uma única vez como
 
 ## Próxima ação exata
 
-O proprietário deve validar rapidamente a produção `0.68.2` após o deploy e enviar o resultado ao ChatGPT. Não iniciar BUG-011 automaticamente.
+O proprietário deve revisar a release `0.68.3` em produção e escolher a próxima frente do projeto. Não iniciar BUG-012 nem outra implementação automaticamente.
 
 O PWA usa network-first e remove caches antigos na ativação. Se já estiver aberto, o usuário pode precisar fechá-lo e abri-lo uma vez; não deve ser necessária limpeza manual de cache.
