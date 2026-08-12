@@ -25,4 +25,17 @@ O proprietário aprovou manualmente Login, Home, Transações, Despesas a Pagar,
 
 ## Git e deploy
 
-Esta documentação integra o próprio commit único da release. O hash final, os pushes de `develop` e `main` e o resultado do deploy Vercel são registrados no relatório operacional entregue ao proprietário após a publicação.
+- commit final: `3bab0ff1afaadadd0cece225f57a42b3a429c485`;
+- push: concluído;
+- branches: `develop` e `main` sincronizadas no commit final;
+- deploy Vercel: concluído;
+- produção: `https://meubolso2.vercel.app`;
+- worktree após a release: limpo.
+
+## Atualização PWA
+
+A produção serve `/app.js?v=0.68.1` e usa `meu-bolso-v0.68.1`. O service worker aplica network-first e remove caches antigos durante a ativação. Usuários com a PWA já aberta podem precisar fechá-la e abri-la uma vez; não deve ser necessária limpeza manual do cache.
+
+## Integridade
+
+BUG-001 a BUG-007 foram incluídos na release homologada. Dados dos usuários foram preservados. O deploy não escreveu no banco nem alterou Auth, RLS ou policies. A migration `auth_user_id` foi aplicada anteriormente e não pertenceu ao deploy desta release.

@@ -6,6 +6,8 @@ const NOTIFICATION_BLOCK_NOTICE_KEY = "minhas-financas-notification-blocked";
 const DUE_NOTIFICATION_LOG_KEY = "minhas-financas-due-notifications";
 const CARD_DUE_NOTIFICATION_LOG_KEY = "minhas-financas-card-due-notifications";
 const ADMIN_NOTIFICATION_KEY = "meu-bolso-admin-notifications";
+const FORM_DRAFT_KEY_PREFIX = "meu-bolso-form-draft";
+const FORM_DRAFT_VERSION = 1;
 const APP_NAME = "MEU BOLSO";
 const APP_UPDATED_AT = "16/07/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
@@ -1020,10 +1022,12 @@ function fromSupabaseRows(rows) {
   });
   rows.receitas.forEach(row => pushForUser(data.transactions, row.usuario_id, {
     id: row.id,
+    recurrenceId: monthlyIncomeRecurrenceIdFromValue(row.recorrencia) || undefined,
+    recurrenceEnded: monthlyIncomeEndedFromValue(row.recorrencia),
     name: row.nome,
     amount: Number(row.valor || 0),
     type: "income",
-    repeat: row.recorrencia || "none",
+    repeat: monthlyIncomeRepeatFromValue(row.recorrencia),
     dueDate: row.data_vencimento,
     status: row.status === "recebido" ? "received" : "pending",
     category: row.categoria,
@@ -1150,7 +1154,7 @@ function toSupabaseRows(data) {
           usuario_id: userId,
           nome: item.name,
           valor: Number(item.amount || 0),
-          recorrencia: item.repeat || "none",
+          recorrencia: monthlyIncomeRecurrenceValue(item),
           data_vencimento: item.dueDate,
           status: isPaidStatus(item) ? "recebido" : "a_receber",
           categoria: item.category || "Outros",
@@ -1293,7 +1297,7 @@ function transactionToSupabaseRow(item, userId = session) {
       usuario_id: userId,
       nome: item.name,
       valor: Number(item.amount || 0),
-      recorrencia: item.repeat || "none",
+      recorrencia: monthlyIncomeRecurrenceValue(item),
       data_vencimento: item.dueDate,
       status: isPaidStatus(item) ? "recebido" : "a_receber",
       categoria: item.category || "Outros",
@@ -1322,8 +1326,117 @@ function transactionToSupabaseRow(item, userId = session) {
   };
 }
 
+function formDraftType(type, cardId = "") {
+  if (type === "income" || type === "expense") return type;
+  if (type === "card-purchase" && cardId) return `${type}:${cardId}`;
+  return "";
+}
+
+function formDraftKey(type) {
+  return session && type ? `${FORM_DRAFT_KEY_PREFIX}:${session}:${type}:new` : "";
+}
+
+function readFormDraft(type) {
+  const key = formDraftKey(type);
+  if (!key) return null;
+  try {
+    const draft = JSON.parse(localStorage.getItem(key) || "null");
+    return draft?.version === FORM_DRAFT_VERSION && draft?.type === type && draft?.fields && typeof draft.fields === "object"
+      ? draft.fields
+      : null;
+  } catch {
+    clearFormDraft(type);
+    return null;
+  }
+}
+
+function writeFormDraft(type, fields) {
+  const key = formDraftKey(type);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ version: FORM_DRAFT_VERSION, type, fields, savedAt: new Date().toISOString() }));
+  } catch (error) {
+    console.warn("[MEU BOLSO][RASCUNHO] não foi possível salvar o rascunho local", error);
+  }
+}
+
+function clearFormDraft(type) {
+  const key = formDraftKey(type);
+  if (!key) return;
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn("[MEU BOLSO][RASCUNHO] não foi possível limpar o rascunho local", error);
+  }
+}
+
+function draftComparableFields(fields) {
+  const comparable = { ...fields };
+  delete comparable.previewOpen;
+  return comparable;
+}
+
+function setFormDraftBaseline(form, fields) {
+  form.dataset.draftBaseline = JSON.stringify(draftComparableFields(fields));
+}
+
+function formDraftHasContent(form, fields) {
+  return JSON.stringify(draftComparableFields(fields)) !== (form.dataset.draftBaseline || "{}");
+}
+
+function persistFormDraft(type, form, fields) {
+  if (!type || !session) return;
+  if (formDraftHasContent(form, fields)) writeFormDraft(type, fields);
+  else clearFormDraft(type);
+}
+
 const MONTHLY_EXPENSE_SOURCE_PREFIX = "manual-recurring:";
 const MONTHLY_EXPENSE_ENDED_SOURCE_PREFIX = "manual-recurring-ended:";
+const MONTHLY_INCOME_RECURRENCE_PREFIX = "manual-income-recurring:";
+const MONTHLY_INCOME_ENDED_PREFIX = "manual-income-recurring-ended:";
+
+function monthlyIncomeRecurrenceMetadata(value) {
+  const recurrence = String(value || "");
+  if (recurrence.startsWith(MONTHLY_INCOME_ENDED_PREFIX)) {
+    return { repeat: "none", recurrenceId: recurrence.slice(MONTHLY_INCOME_ENDED_PREFIX.length), ended: true };
+  }
+  if (recurrence.startsWith(MONTHLY_INCOME_RECURRENCE_PREFIX)) {
+    const encoded = recurrence.slice(MONTHLY_INCOME_RECURRENCE_PREFIX.length);
+    const separator = encoded.indexOf(":");
+    if (separator > 0) {
+      const repeat = encoded.slice(0, separator);
+      return { repeat: repeat === "fixed" ? "fixed" : "none", recurrenceId: encoded.slice(separator + 1), ended: false };
+    }
+  }
+  return { repeat: recurrence === "fixed" ? "fixed" : "none", recurrenceId: "", ended: false };
+}
+
+function monthlyIncomeRecurrenceIdFromValue(value) {
+  return monthlyIncomeRecurrenceMetadata(value).recurrenceId;
+}
+
+function monthlyIncomeEndedFromValue(value) {
+  return monthlyIncomeRecurrenceMetadata(value).ended;
+}
+
+function monthlyIncomeRepeatFromValue(value) {
+  return monthlyIncomeRecurrenceMetadata(value).repeat;
+}
+
+function monthlyIncomeRecurrenceValue(item) {
+  const recurrenceId = String(item?.recurrenceId || "").trim();
+  if (!recurrenceId) return item?.repeat === "fixed" ? "fixed" : "none";
+  if (item.recurrenceEnded) return `${MONTHLY_INCOME_ENDED_PREFIX}${recurrenceId}`;
+  return `${MONTHLY_INCOME_RECURRENCE_PREFIX}${item.repeat === "fixed" ? "fixed" : "none"}:${recurrenceId}`;
+}
+
+function isMonthlyIncomeClosure(item) {
+  return item?.type === "income" && item.recurrenceEnded === true && Boolean(item.recurrenceId);
+}
+
+function isRecurringClosure(item) {
+  return isMonthlyExpenseClosure(item) || isMonthlyIncomeClosure(item);
+}
 
 function monthlyExpenseRecurrenceIdFromOrigin(origin) {
   const value = String(origin || "");
@@ -1409,6 +1522,8 @@ function monthlyIncomePermanentKey(item) {
 }
 
 function monthlyIncomeSeriesToken(item) {
+  const recurrenceId = String(item.recurrenceId || "").trim();
+  if (recurrenceId) return recurrenceId;
   const compactId = String(item.id || "").replace(/-/g, "").toLowerCase();
   if (/^[0-9a-f]{32}$/.test(compactId) && compactId[12] === "5" && compactId[16] === "b") return compactId.slice(0, 20);
   const hash = stableHashHex(monthlyIncomePermanentKey(item), 32).split("");
@@ -1435,7 +1550,7 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
   const targetMonth = targetDate.slice(0, 7);
   const monthlyIncomes = db.transactions[userId].filter(item =>
     item.type === "income" &&
-    item.repeat === "fixed" &&
+    (item.repeat === "fixed" || item.recurrenceId) &&
     item.dueDate &&
     item.dueDate.slice(0, 7) <= targetMonth
   );
@@ -1448,7 +1563,7 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
   series.forEach((items, token) => {
     if (items.some(item => item.dueDate.slice(0, 7) === targetMonth)) return;
     const source = [...items].sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
-    if (!source || source.dueDate.slice(0, 7) >= targetMonth) return;
+    if (!source || source.repeat !== "fixed" || source.recurrenceEnded || source.dueDate.slice(0, 7) >= targetMonth) return;
     const id = monthlyIncomeOccurrenceId(token, targetMonth);
     if (db.transactions[userId].some(item => item.id === id)) return;
     created.push({
@@ -1457,6 +1572,8 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
       amount: source.amount,
       type: "income",
       repeat: "fixed",
+      recurrenceId: token,
+      recurrenceEnded: false,
       dueDate: monthlyIncomeDueDate(items, targetMonth),
       status: "pending",
       category: source.category || "Outros",
@@ -1471,7 +1588,14 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
   if (!created.length) return [];
   db.transactions[userId].unshift(...created);
   cacheDatabase();
-  await upsertRows("receitas", created.map(item => transactionToSupabaseRow(item, userId)));
+  try {
+    await upsertRows("receitas", created.map(item => transactionToSupabaseRow(item, userId)));
+  } catch (error) {
+    const createdIds = new Set(created.map(item => item.id));
+    db.transactions[userId] = db.transactions[userId].filter(item => !createdIds.has(item.id));
+    cacheDatabase();
+    throw error;
+  }
   created.forEach(item => logActivity(`Gerou receita mensal ${item.name} para ${targetMonth}.`, userId));
   return created;
 }
@@ -1536,6 +1660,71 @@ async function saveTransactionToSupabase(item, previousType = item.type) {
 
 async function saveMonthlyExpenseSeriesToSupabase(items) {
   await upsertRows("despesas", items.map(item => transactionToSupabaseRow(item)));
+}
+
+async function saveMonthlyIncomeSeriesToSupabase(items) {
+  await upsertRows("receitas", items.map(item => transactionToSupabaseRow(item)));
+}
+
+function monthlyIncomeEditPlan(items, transactionId, values) {
+  const existing = items.find(item => item.id === transactionId);
+  if (!existing || existing.type !== "income" || values.type !== "income" || existing.repeat !== "fixed") return null;
+  const seriesToken = monthlyIncomeSeriesToken(existing);
+  const startingMonth = String(existing.dueDate || "").slice(0, 7);
+  const changes = items
+    .filter(item =>
+      item.type === "income" &&
+      item.dueDate &&
+      item.dueDate.slice(0, 7) >= startingMonth &&
+      monthlyIncomeSeriesToken(item) === seriesToken
+    )
+    .map(item => {
+      const isSelected = item.id === transactionId;
+      const sharedValues = {
+        name: values.name,
+        amount: values.amount,
+        repeat: values.repeat,
+        category: values.category,
+        account: values.account,
+        recurrenceId: seriesToken,
+        recurrenceEnded: false,
+        dueDate: monthlyExpenseDateForMonth(values.dueDate, item.dueDate.slice(0, 7))
+      };
+      return {
+        previous: item,
+        next: isSelected ? { ...item, ...values, ...sharedValues } : { ...item, ...sharedValues }
+      };
+    });
+  return { seriesToken, changes };
+}
+
+function monthlyIncomeDeletePlan(items, transactionId) {
+  const existing = items.find(item => item.id === transactionId);
+  if (!existing || existing.type !== "income" || (existing.repeat !== "fixed" && !existing.recurrenceId)) return null;
+  const seriesToken = monthlyIncomeSeriesToken(existing);
+  const startingMonth = String(existing.dueDate || "").slice(0, 7);
+  const changes = items
+    .filter(item =>
+      item.type === "income" &&
+      item.dueDate &&
+      item.dueDate.slice(0, 7) >= startingMonth &&
+      monthlyIncomeSeriesToken(item) === seriesToken
+    )
+    .map(item => ({
+      previous: item,
+      next: {
+        ...item,
+        amount: 0,
+        repeat: "none",
+        status: "pending",
+        paymentMethod: "",
+        paidDate: "",
+        paidTime: "",
+        recurrenceId: seriesToken,
+        recurrenceEnded: true
+      }
+    }));
+  return { seriesToken, startingMonth, changes };
 }
 
 function monthlyExpenseEditPlan(items, transactionId, values) {
@@ -1829,11 +2018,11 @@ function accessStatus(user) {
 
 function transactionsFor(userId) {
   if (isMaster()) {
-    if (userId === "all") return regularUsers().flatMap(user => (db.transactions[user.id] || []).filter(item => !isMonthlyExpenseClosure(item)).map(item => ({ ...item, ownerId: user.id, ownerName: user.name })));
+    if (userId === "all") return regularUsers().flatMap(user => (db.transactions[user.id] || []).filter(item => !isRecurringClosure(item)).map(item => ({ ...item, ownerId: user.id, ownerName: user.name })));
     if (!regularUsers().some(user => user.id === userId)) return [];
-    return (db.transactions[userId] || []).filter(item => !isMonthlyExpenseClosure(item)).map(item => ({ ...item, ownerId: userId, ownerName: db.users.find(user => user.id === userId)?.name }));
+    return (db.transactions[userId] || []).filter(item => !isRecurringClosure(item)).map(item => ({ ...item, ownerId: userId, ownerName: db.users.find(user => user.id === userId)?.name }));
   }
-  return (db.transactions[session] || []).filter(item => !isMonthlyExpenseClosure(item));
+  return (db.transactions[session] || []).filter(item => !isRecurringClosure(item));
 }
 
 function userTransactions() {
@@ -1980,6 +2169,25 @@ function cardInvoiceTargetMonth(cardId) {
   return cardId ? monthKey(invoiceClosingDate(cardId)) : monthKey();
 }
 
+function shiftMonthKey(competence, offset) {
+  const [year, month] = String(competence || "").split("-").map(Number);
+  if (!year || !month) return monthKey();
+  const shifted = new Date(year, month - 1 + Number(offset || 0), 1, 12);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function cardDueDateForCompetence(card, competence) {
+  const [year, month] = String(competence || "").split("-").map(Number);
+  if (!year || !month) return dateOffset();
+  const day = Math.min(Math.max(Number(card?.dueDay || 1), 1), daysInMonth(year, month - 1));
+  return `${competence}-${String(day).padStart(2, "0")}`;
+}
+
+function initialPurchaseInstallmentDate(card, paidInstallmentsCount = 0) {
+  const currentCompetence = cardInvoiceTargetMonth(card?.id);
+  return cardDueDateForCompetence(card, shiftMonthKey(currentCompetence, -Math.max(Number(paidInstallmentsCount) || 0, 0)));
+}
+
 function cardInvoiceItems(cardId = null, targetMonth = null, userId = session) {
   const resolvedTargetMonth = targetMonth || cardInvoiceTargetMonth(cardId);
   const purchasesById = new Map(userCardPurchases(userId).map(purchase => [purchase.id, purchase]));
@@ -2121,7 +2329,7 @@ function dashboardTransactions() {
 }
 
 function financialItemsForUser(userId) {
-  const baseItems = (db.transactions[userId] || []).filter(item => item.source !== "card-installment" && !isMonthlyExpenseClosure(item));
+  const baseItems = (db.transactions[userId] || []).filter(item => item.source !== "card-installment" && !isRecurringClosure(item));
   return [...baseItems, ...cardInstallmentItems(userId)];
 }
 
@@ -3158,7 +3366,7 @@ function receivedIncomeCard(item) {
   const receivedDate = item.paidDate || item.dueDate;
   return `
     <article class="receivable-card received-income-card">
-      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Recebimento: ${formatDate(receivedDate, true)}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
+      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Recebimento: ${formatDate(receivedDate, true)} · ${escapeHtml(transactionPeriodicity(item))}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
       <div class="receivable-value"><strong>${money(item.amount)}</strong><span>Recebido</span></div>
       <b class="received-date-badge"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="m5.5 9 2.2 2.2 4.8-5"/></svg><span>Recebido em ${formatDate(receivedDate, true)}</span></b>
       <div class="receivable-actions received-income-actions">
@@ -3250,7 +3458,7 @@ function receivableCard(item, overdue) {
   const days = overdueDays(item);
   return `
     <article class="receivable-card ${overdue ? "overdue" : ""}">
-      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Vencimento: ${formatDate(item.dueDate, true)}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
+      <div class="receivable-main"><h4>${escapeHtml(item.name)}</h4><time>Vencimento: ${formatDate(item.dueDate, true)} · ${escapeHtml(transactionPeriodicity(item))}</time><small>${escapeHtml(item.category || "Outros")}</small></div>
       <div class="receivable-value"><strong>${money(item.amount)}</strong><span>A receber</span></div>
       ${overdue ? `<b class="overdue-badge"><svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7"/><path d="M9 5.2v5M9 13v.2"/></svg><span>Atrasado ${days} ${days === 1 ? "dia" : "dias"}</span></b>` : ""}
       <div class="receivable-actions">
@@ -3668,7 +3876,7 @@ function transactionDescription(item, showOwner = false) {
     const card = userCards(item.ownerId || session).find(c => c.id === purchase?.cardId);
     return `${owner}Compra no cartão${card ? ` - ${escapeHtml(card.name)}` : ""} · Categoria: ${escapeHtml(item.category)} · ${formatDate(item.dueDate)}`;
   }
-  return `${owner}${escapeHtml(item.category)} · ${formatDate(item.dueDate)}${item.repeat === "fixed" ? " · Mensal" : ""}`;
+  return `${owner}${escapeHtml(item.category)} · ${formatDate(item.dueDate)} · ${escapeHtml(transactionPeriodicity(item))}`;
 }
 
 function statusLabel(item) {
@@ -4206,6 +4414,12 @@ function purchaseFormTemplate(cards, currentPurchase = null) {
   const installmentCount = Number(editing?.installments || 1);
   const paidInstallmentCount = Math.min((editing?.paidInstallments || []).length, installmentCount);
   const availableLimit = availableCardLimit(card?.id);
+  const previewPurchase = editing || {
+    cardId: card?.id,
+    amount: Number(editing?.amount || 0),
+    installments: installmentCount,
+    purchaseDate: initialPurchaseInstallmentDate(card, paidInstallmentCount)
+  };
   return `
     <form id="purchase-form">
       <div class="sheet-handle"></div>
@@ -4232,10 +4446,17 @@ function purchaseFormTemplate(cards, currentPurchase = null) {
           <label class="field"><span>Quantidade de parcelas</span><select name="installments"><option value="1" ${installmentCount === 1 ? "selected" : ""}>1x</option>${Array.from({ length: 11 }, (_, index) => `<option value="${index + 2}" ${installmentCount === index + 2 ? "selected" : ""}>${index + 2}x</option>`).join("")}</select></label>
           <div class="purchase-installment-value"><span>Valor da parcela</span><strong data-purchase-installment-value>${money(Number(editing?.amount || 0) / Math.max(installmentCount, 1))}</strong></div>
           <label class="field purchase-paid-installments-field" data-purchase-paid-installments ${!(installmentCount > 1 && editing && allInstallmentsPaid(editing)) ? "hidden" : ""}><span>Parcelas já pagas</span><input name="paidInstallmentsCount" type="number" inputmode="numeric" min="0" max="${installmentCount}" step="1" value="${paidInstallmentCount}"></label>
+          <details class="purchase-installment-preview" data-purchase-installment-preview>
+            <summary>Prévia <span aria-hidden="true">⌄</span></summary>
+            <div class="purchase-installment-preview-list" data-purchase-installment-preview-list>${purchaseInstallmentPreviewRows(previewPurchase, card, paidInstallmentCount)}</div>
+          </details>
         </div>
         <label class="field"><span class="field-title">Categoria</span><select name="category">${userCategories().map(category => `<option ${editing?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
         <label class="field"><span>Status</span><select name="status" data-purchase-status><option value="pending">Pendente</option><option value="paid" ${editing && allInstallmentsPaid(editing) ? "selected" : ""}>Pago</option></select></label>
-        <button class="primary-button card-save-button purchase-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar compra</span></button>
+        <div class="draft-form-actions">
+          ${editing ? "" : `<button class="draft-discard-button" type="button" data-discard-purchase-draft>Descartar</button>`}
+          <button class="primary-button card-save-button purchase-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar compra</span></button>
+        </div>
       </div>
     </form>`;
 }
@@ -4290,9 +4511,41 @@ function purchaseInstallmentCard(item, card) {
 function installmentDueDate(purchase, installmentNumber) {
   const override = purchase.installmentDueDates?.[installmentNumber];
   if (/^\d{4}-\d{2}-\d{2}$/.test(override || "")) return override;
-  const date = new Date(`${purchase.purchaseDate}T12:00:00`);
-  date.setMonth(date.getMonth() + installmentNumber - 1);
-  return localDateKey(date);
+  const [year, month, day] = String(purchase.purchaseDate || "").split("-").map(Number);
+  if (!year || !month || !day) return dateOffset();
+  const target = new Date(year, month - 1 + installmentNumber - 1, 1, 12);
+  const safeDay = Math.min(day, daysInMonth(target.getFullYear(), target.getMonth()));
+  return localDateKey(new Date(target.getFullYear(), target.getMonth(), safeDay, 12));
+}
+
+function purchaseInstallmentPreviewRows(purchase, card, paidCount = 0) {
+  const total = Math.max(Number(purchase?.installments || 1), 1);
+  const amount = Number(purchase?.amount || 0);
+  const currentCompetence = cardInvoiceTargetMonth(card?.id);
+  const normalizedPaidCount = Math.min(Math.max(Number(paidCount) || 0, 0), total);
+  let nextFutureAssigned = false;
+  return Array.from({ length: total }, (_, index) => {
+    const number = index + 1;
+    const dueDate = installmentDueDate(purchase, number);
+    const competence = monthKey(dueDate);
+    let status = "PENDENTE";
+    let statusClass = "pending";
+    if (number <= normalizedPaidCount) {
+      status = "PAGO";
+      statusClass = "paid";
+    } else if (competence < currentCompetence || (competence === currentCompetence && dueDate < dateOffset())) {
+      status = "VENCIDO";
+      statusClass = "overdue";
+    } else if (competence === currentCompetence) {
+      status = "FATURA ATUAL";
+      statusClass = "current";
+    } else if (!nextFutureAssigned) {
+      status = "PRÓXIMA";
+      statusClass = "next";
+      nextFutureAssigned = true;
+    }
+    return `<div class="purchase-installment-preview-row"><span>${formatDate(dueDate, true)} · ${number}/${total} · ${money(amount / total)}</span><b class="${statusClass}">${status}</b></div>`;
+  }).join("");
 }
 
 function allInstallmentsPaid(purchase) {
@@ -5208,6 +5461,9 @@ function bindAppEvents() {
   purchaseForm?.querySelector("[data-purchase-status]")?.addEventListener("change", updatePurchasePaymentFields);
   purchaseForm?.elements.installments?.addEventListener("change", updatePurchasePaymentFields);
   purchaseForm?.elements.amount?.addEventListener("input", updatePurchasePaymentFields);
+  purchaseForm?.elements.paidInstallmentsCount?.addEventListener("input", updatePurchasePaymentFields);
+  if (purchaseForm) bindPurchaseDraft(purchaseForm);
+  document.querySelector("[data-discard-purchase-draft]")?.addEventListener("click", discardPurchaseDraft);
   document.querySelector("[data-close-purchase-dialog]")?.addEventListener("click", closePurchaseEditor);
   const purchaseDialog = document.querySelector("#purchase-dialog");
   if (purchaseDialog) {
@@ -6019,7 +6275,10 @@ function openTransactionDialog(type = "expense") {
   form.elements.type.value = type === "income" ? "income" : "expense";
   updateStatusOptions();
   refreshTransactionLists();
+  setFormDraftBaseline(form, transactionDraftFields(form));
+  const restored = restoreTransactionDraft(form, form.elements.type.value);
   dialog.showModal();
+  if (restored) showToast("Rascunho restaurado.");
 }
 
 function openCardDialog(cardId = null, mode = "edit") {
@@ -6068,16 +6327,20 @@ function editTransaction(transactionId) {
   });
   form.elements.amount.value = String(item.amount).replace(".", ",");
   document.querySelector("#form-title").textContent = "Editar transação";
+  document.querySelector("[data-discard-transaction-draft]").hidden = true;
   document.querySelector("#transaction-dialog").showModal();
 }
 
 document.querySelector("[data-close-dialog]").addEventListener("click", () => document.querySelector("#transaction-dialog").close());
+document.querySelector("[data-discard-transaction-draft]")?.addEventListener("click", discardTransactionDraft);
 document.querySelector("[data-close-category-dialog]")?.addEventListener("click", () => document.querySelector("#category-dialog")?.close());
 document.querySelector("#category-form")?.addEventListener("submit", saveCategory);
 document.querySelectorAll("#transaction-form input[name='type']").forEach(input => input.addEventListener("change", () => {
   updateStatusOptions();
   refreshTransactionLists();
 }));
+document.querySelector("#transaction-form")?.addEventListener("input", persistTransactionDraftFromEvent);
+document.querySelector("#transaction-form")?.addEventListener("change", persistTransactionDraftFromEvent);
 document.querySelector("#transaction-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (isMaster()) return;
@@ -6125,17 +6388,18 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     const index = db.transactions[session].findIndex(item => item.id === editingTransactionId);
     if (index < 0) return showToast("Não foi possível concluir a operação.");
     previousType = db.transactions[session][index].type;
-    recurringEditPlan = monthlyExpenseEditPlan(db.transactions[session], editingTransactionId, values);
+    recurringEditPlan = monthlyExpenseEditPlan(db.transactions[session], editingTransactionId, values)
+      || monthlyIncomeEditPlan(db.transactions[session], editingTransactionId, values);
     if (recurringEditPlan) {
       const changesById = new Map(recurringEditPlan.changes.map(change => [change.next.id, change.next]));
       db.transactions[session] = db.transactions[session].map(item => changesById.get(item.id) || item);
       recurringItemsToSave = recurringEditPlan.changes.map(change => change.next);
       savedItem = changesById.get(editingTransactionId);
     } else {
-      const recurrenceId = previousType === "expense" && values.type === "expense" && values.repeat === "fixed"
-        ? (db.transactions[session][index].recurrenceId || crypto.randomUUID())
+      const recurrenceId = ["expense", "income"].includes(previousType) && previousType === values.type && values.repeat === "fixed"
+        ? (db.transactions[session][index].recurrenceId || (values.type === "income" ? monthlyIncomeSeriesToken(db.transactions[session][index]) : crypto.randomUUID()))
         : db.transactions[session][index].recurrenceId;
-      db.transactions[session][index] = { ...db.transactions[session][index], ...values, recurrenceId };
+      db.transactions[session][index] = { ...db.transactions[session][index], ...values, recurrenceId, recurrenceEnded: false };
       savedItem = db.transactions[session][index];
     }
   } else {
@@ -6143,12 +6407,17 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       ...values,
-      recurrenceId: values.type === "expense" && values.repeat === "fixed" ? crypto.randomUUID() : undefined
+      recurrenceId: values.type === "expense" && values.repeat === "fixed" ? crypto.randomUUID() : undefined,
+      recurrenceEnded: false
     };
+    if (values.type === "income" && values.repeat === "fixed") savedItem.recurrenceId = monthlyIncomeSeriesToken(savedItem);
     db.transactions[session].unshift(savedItem);
   }
   try {
-    if (recurringItemsToSave.length) await saveMonthlyExpenseSeriesToSupabase(recurringItemsToSave);
+    if (recurringItemsToSave.length) {
+      if (savedItem.type === "income") await saveMonthlyIncomeSeriesToSupabase(recurringItemsToSave);
+      else await saveMonthlyExpenseSeriesToSupabase(recurringItemsToSave);
+    }
     else await saveTransactionToSupabase(savedItem, previousType);
     cacheDatabase();
     try {
@@ -6166,6 +6435,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     return showToast("Não foi possível salvar no Supabase.");
   }
   logActivity(`${actionVerb(wasEditingTransaction, "Cadastrou", "Editou")} ${savedItem.type === "income" ? "receita" : "despesa"} ${savedItem.name}. Valor: ${money(savedItem.amount)}`);
+  if (!wasEditingTransaction) clearFormDraft(formDraftType(savedItem.type));
   editingTransactionId = null;
   document.querySelector("#transaction-dialog").close();
   showToast("Operação realizada com sucesso.");
@@ -6176,14 +6446,16 @@ async function deleteTransaction(transactionId) {
   if (isMaster() || !await confirmAction()) return;
   const item = (db.transactions[session] || []).find(transaction => transaction.id === transactionId);
   if (!item) return showToast("Não foi possível concluir a operação.");
-  const recurringDeletePlan = monthlyExpenseDeletePlan(db.transactions[session] || [], transactionId);
+  const recurringDeletePlan = monthlyExpenseDeletePlan(db.transactions[session] || [], transactionId)
+    || monthlyIncomeDeletePlan(db.transactions[session] || [], transactionId);
   if (recurringDeletePlan) {
     const transactionsBeforeDelete = db.transactions[session].map(transaction => ({ ...transaction }));
     const changesById = new Map(recurringDeletePlan.changes.map(change => [change.next.id, change.next]));
     const closureItems = recurringDeletePlan.changes.map(change => change.next);
     db.transactions[session] = db.transactions[session].map(transaction => changesById.get(transaction.id) || transaction);
     try {
-      await saveMonthlyExpenseSeriesToSupabase(closureItems);
+      if (item.type === "income") await saveMonthlyIncomeSeriesToSupabase(closureItems);
+      else await saveMonthlyExpenseSeriesToSupabase(closureItems);
       cacheDatabase();
       try {
         await refreshUserFinancialData();
@@ -6196,7 +6468,7 @@ async function deleteTransaction(transactionId) {
       cacheDatabase();
       return showDeleteError(error);
     }
-    logActivity(`Encerrou despesa mensal ${item.name} a partir de ${recurringDeletePlan.startingMonth}. Valor anterior: ${money(item.amount)}`);
+    logActivity(`Encerrou ${item.type === "income" ? "receita" : "despesa"} mensal ${item.name} a partir de ${recurringDeletePlan.startingMonth}. Valor anterior: ${money(item.amount)}`);
     showToast("Operação realizada com sucesso.");
     render();
     return;
@@ -6240,6 +6512,123 @@ function refreshTransactionLists(currentCategory = "") {
   const form = document.querySelector("#transaction-form");
   if (!form) return;
   fillSelect(form.elements.category, transactionCategoryNames(form.elements.type.value, currentCategory), currentCategory || preferredCategory);
+}
+
+function transactionDraftFields(form) {
+  return {
+    type: form.elements.type.value,
+    name: form.elements.name.value,
+    amount: form.elements.amount.value,
+    dueDate: form.elements.dueDate.value,
+    repeat: form.elements.repeat.value,
+    category: form.elements.category.value,
+    status: form.elements.status.value
+  };
+}
+
+function persistTransactionDraftFromEvent(event) {
+  const form = event.currentTarget;
+  if (editingTransactionId) return;
+  persistFormDraft(formDraftType(form.elements.type.value), form, transactionDraftFields(form));
+}
+
+function restoreTransactionDraft(form, type) {
+  const draft = readFormDraft(formDraftType(type));
+  const discardButton = document.querySelector("[data-discard-transaction-draft]");
+  if (discardButton) discardButton.hidden = false;
+  if (!draft) return false;
+  form.elements.type.value = type;
+  updateStatusOptions();
+  refreshTransactionLists(draft.category || "");
+  ["name", "amount", "dueDate", "repeat", "category", "status"].forEach(name => {
+    if (draft[name] != null && form.elements[name]) form.elements[name].value = draft[name];
+  });
+  return true;
+}
+
+function purchaseDraftFields(form) {
+  return {
+    cardId: form.elements.cardId.value,
+    name: form.elements.name.value,
+    amount: form.elements.amount.value,
+    paymentMode: form.querySelector("[data-purchase-payment-mode]")?.value || "cash",
+    installments: form.elements.installments.value,
+    paidInstallmentsCount: form.elements.paidInstallmentsCount?.value || "0",
+    category: form.elements.category.value,
+    status: form.elements.status.value,
+    previewOpen: Boolean(form.querySelector("[data-purchase-installment-preview]")?.open)
+  };
+}
+
+function purchaseDraftType(form) {
+  return formDraftType("card-purchase", form?.elements.cardId?.value || selectedCardId);
+}
+
+function restorePurchaseDraft(form) {
+  const draft = readFormDraft(purchaseDraftType(form));
+  if (!draft) return false;
+  const paymentMode = form.querySelector("[data-purchase-payment-mode]");
+  if (paymentMode && draft.paymentMode) paymentMode.value = draft.paymentMode;
+  ["name", "amount", "installments", "paidInstallmentsCount", "category", "status"].forEach(name => {
+    if (draft[name] != null && form.elements[name]) form.elements[name].value = draft[name];
+  });
+  updatePurchasePaymentFields();
+  const preview = form.querySelector("[data-purchase-installment-preview]");
+  if (preview) preview.open = Boolean(draft.previewOpen);
+  return true;
+}
+
+function persistPurchaseDraft(form) {
+  if (editingPurchaseId || form.elements.id.value) return;
+  persistFormDraft(purchaseDraftType(form), form, purchaseDraftFields(form));
+}
+
+function bindPurchaseDraft(form) {
+  if (editingPurchaseId || form.elements.id.value) return;
+  setFormDraftBaseline(form, purchaseDraftFields(form));
+  const restored = restorePurchaseDraft(form);
+  form.addEventListener("input", () => persistPurchaseDraft(form));
+  form.addEventListener("change", () => persistPurchaseDraft(form));
+  form.querySelector("[data-purchase-installment-preview]")?.addEventListener("toggle", () => persistPurchaseDraft(form));
+  if (restored) showToast("Rascunho restaurado.");
+}
+
+async function confirmDraftDiscard() {
+  const dialog = document.querySelector("#confirm-dialog");
+  const title = dialog.querySelector("h2");
+  const message = dialog.querySelector("p");
+  const yesButton = dialog.querySelector("[data-confirm-yes]");
+  const noButton = dialog.querySelector("[data-confirm-no]");
+  const previous = [title.textContent, message.textContent, yesButton.textContent, noButton.textContent];
+  title.textContent = "Descartar este cadastro?";
+  message.textContent = "Os dados preenchidos neste rascunho serão apagados.";
+  yesButton.textContent = "Descartar";
+  noButton.textContent = "Voltar";
+  try {
+    return await confirmAction();
+  } finally {
+    [title.textContent, message.textContent, yesButton.textContent, noButton.textContent] = previous;
+  }
+}
+
+async function discardTransactionDraft() {
+  const form = document.querySelector("#transaction-form");
+  const type = formDraftType(form.elements.type.value);
+  const hasContent = Boolean(readFormDraft(type)) || formDraftHasContent(form, transactionDraftFields(form));
+  if (hasContent && !await confirmDraftDiscard()) return;
+  clearFormDraft(type);
+  form.reset();
+  document.querySelector("#transaction-dialog")?.close();
+}
+
+async function discardPurchaseDraft() {
+  const form = document.querySelector("#purchase-form");
+  if (!form) return;
+  const type = purchaseDraftType(form);
+  const hasContent = Boolean(readFormDraft(type)) || formDraftHasContent(form, purchaseDraftFields(form));
+  if (hasContent && !await confirmDraftDiscard()) return;
+  clearFormDraft(type);
+  closePurchaseEditor();
 }
 
 function refreshPurchaseLists() {
@@ -6287,6 +6676,33 @@ function updatePurchasePaymentFields() {
   }
   const installmentValue = form.querySelector("[data-purchase-installment-value]");
   if (installmentValue) installmentValue.textContent = money(Number.isFinite(amount) ? amount / installments : 0);
+  updatePurchaseInstallmentPreview(form);
+}
+
+function updatePurchaseInstallmentPreview(form) {
+  const preview = form.querySelector("[data-purchase-installment-preview-list]");
+  if (!preview) return;
+  const cardId = form.elements.cardId.value;
+  const card = userCards().find(item => item.id === cardId);
+  if (!card) {
+    preview.innerHTML = "";
+    return;
+  }
+  const installments = Math.max(Number(form.elements.installments.value || 1), 1);
+  const status = form.elements.status.value;
+  const existing = form.elements.id.value ? userCardPurchases().find(item => item.id === form.elements.id.value) : null;
+  const requestedPaidCount = status === "paid"
+    ? installments === 1 ? 1 : Number(form.elements.paidInstallmentsCount?.value || 0)
+    : existing && !allInstallmentsPaid(existing) ? Math.min((existing.paidInstallments || []).length, installments) : 0;
+  const paidCount = Math.min(Math.max(Number(requestedPaidCount) || 0, 0), installments);
+  const purchase = {
+    cardId,
+    amount: parseMoney(form.elements.amount.value) || 0,
+    installments,
+    purchaseDate: existing?.purchaseDate || initialPurchaseInstallmentDate(card, paidCount),
+    installmentDueDates: existing?.installmentDueDates || {}
+  };
+  preview.innerHTML = purchaseInstallmentPreviewRows(purchase, card, paidCount);
 }
 
 function closePurchaseEditor() {
@@ -6845,16 +7261,20 @@ async function saveCardPurchase(event) {
   }
   if (!await confirmAction()) return;
   db.cardPurchases[session] ||= [];
+  const purchasesBeforeSave = structuredClone(db.cardPurchases[session]);
+  const transactionsBeforeSave = structuredClone(db.transactions[session] || []);
+  const existingPurchase = id ? db.cardPurchases[session].find(item => item.id === id) : null;
+  const card = userCards().find(item => item.id === data.get("cardId"));
+  if (!card) return showToast("Não foi possível concluir a operação.");
   const values = {
     cardId: data.get("cardId"),
     name: data.get("name").trim(),
     amount,
     installments,
-    purchaseDate: invoiceClosingDate(data.get("cardId")),
+    purchaseDate: existingPurchase?.purchaseDate || initialPurchaseInstallmentDate(card, requestedPaidInstallments),
     category: data.get("category").trim(),
     paidInstallments: []
   };
-  const existingPurchase = id ? db.cardPurchases[session].find(item => item.id === id) : null;
   const preservedPaidCount = existingPurchase && status !== "paid" && !allInstallmentsPaid(existingPurchase)
     ? Math.min((existingPurchase.paidInstallments || []).length, installments)
     : 0;
@@ -6903,8 +7323,12 @@ async function saveCardPurchase(event) {
     await refreshUserFinancialData();
     selectedCardId = savedPurchase.cardId;
   } catch (error) {
+    db.cardPurchases[session] = purchasesBeforeSave;
+    db.transactions[session] = transactionsBeforeSave;
+    cacheDatabase();
     return showToast("Não foi possível salvar no Supabase.");
   }
+  if (!wasEditingPurchase) clearFormDraft(formDraftType("card-purchase", savedPurchase.cardId));
   purchaseFormOpen = false;
   editingPurchaseId = null;
   selectedCardId = savedPurchase.cardId;
@@ -6965,7 +7389,7 @@ function syncPaidInstallmentTransactions(purchase) {
       amount: purchase.amount / purchase.installments,
       type: "expense",
       repeat: "none",
-      dueDate: `${key.slice(0, 7)}-01`,
+      dueDate: installmentDueDate(purchase, installmentNumber),
       status: "paid",
       category: purchase.category || "Outros",
       account: payment.account || "Cartão",

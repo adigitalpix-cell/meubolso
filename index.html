@@ -108,7 +108,10 @@
         </label>
         <p class="transaction-method-hint field-wide">O método de pagamento ou recebimento será solicitado ao concluir a movimentação.</p>
       </div>
-      <button class="primary-button transaction-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar movimentação</span></button>
+      <div class="draft-form-actions">
+        <button class="draft-discard-button" type="button" data-discard-transaction-draft>Descartar</button>
+        <button class="primary-button transaction-save-button" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v6h8V4M8 20v-6h8v6"/></svg><span>Salvar movimentação</span></button>
+      </div>
     </form>
   </dialog>
 
@@ -188,7 +191,7 @@
 
   <script src="/vendor/supabase-js-2.112.2.min.js"></script>
   <script src="/supabase-config.js"></script>
-  <script src="/app.js?v=0.68.1"></script>
+  <script src="/app.js?v=0.68.2"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js", { scope: "/" }));

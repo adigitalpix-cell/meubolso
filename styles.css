@@ -272,6 +272,11 @@ button { cursor: pointer; }
   .home-overview-card.metrics-only .home-overview-metric strong { font-size: 20px; }
 }
 
+.draft-form-actions { display: grid; gap: 8px; }
+.draft-form-actions .primary-button { width: 100%; }
+.draft-discard-button { min-height: 34px; border: 0; color: #527066; background: transparent; font: inherit; font-size: .68rem; font-weight: 850; text-decoration: underline; text-underline-offset: 3px; }
+.draft-discard-button:active { color: #0b6649; background: #edf6f1; }
+
 .home-dashboard-section { width: 100%; margin-top: 14px; padding: 17px; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); background: white; box-shadow: 0 8px 24px rgba(22,53,43,.045); text-align: left; }
 .home-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .home-section-heading span { display: block; margin-bottom: 4px; color: var(--green); font-size: 9px; font-weight: 900; letter-spacing: 1.1px; text-transform: uppercase; }
@@ -1695,10 +1700,25 @@ body:has(#card-dialog[open]) { overflow: hidden; }
 .purchase-installment-value strong { display: block; margin-top: 7px; color: #086146; font-size: 1rem; font-weight: 900; white-space: nowrap; }
 .purchase-paid-installments-field { grid-column: 1 / -1; }
 .purchase-paid-installments-field[hidden] { display: none; }
+.purchase-installment-preview { grid-column: 1 / -1; min-width: 0; }
+.purchase-installment-preview summary { width: fit-content; padding: 4px 1px; display: flex; align-items: center; gap: 5px; color: #356354; font-size: .66rem; font-weight: 820; cursor: pointer; list-style: none; }
+.purchase-installment-preview summary::-webkit-details-marker { display: none; }
+.purchase-installment-preview summary span { display: inline-block; color: #16825c; font-size: .8rem; transition: transform .18s ease; }
+.purchase-installment-preview[open] summary span { transform: rotate(180deg); }
+.purchase-installment-preview-list { margin-top: 5px; padding: 7px 8px; display: grid; gap: 5px; border: 1px solid #dfeae4; border-radius: 11px; background: rgba(255,255,255,.68); }
+.purchase-installment-preview-row { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 7px; color: #53665d; font-size: .58rem; line-height: 1.3; }
+.purchase-installment-preview-row span { min-width: 0; }
+.purchase-installment-preview-row b { flex: 0 0 auto; padding: 2px 5px; border-radius: 99px; font-size: .48rem; font-weight: 900; letter-spacing: .02em; }
+.purchase-installment-preview-row b.paid { color: #176342; background: #ddf4e7; }
+.purchase-installment-preview-row b.current { color: #315a18; background: #e8f8cb; }
+.purchase-installment-preview-row b.overdue { color: #9f2828; background: #ffe3e0; }
+.purchase-installment-preview-row b.next { color: #775915; background: #fff1c7; }
+.purchase-installment-preview-row b.pending { color: #5c6963; background: #e9efec; }
 
 @media (max-width: 380px) {
   .purchase-sheet .static-field { padding-inline: 8px; font-size: .59rem; }
   .purchase-fixed-card strong { font-size: .69rem; }
+  .purchase-installment-preview-row { align-items: flex-start; font-size: .52rem; }
 }
 
 body:has(#purchase-dialog[open]) { overflow: hidden; }

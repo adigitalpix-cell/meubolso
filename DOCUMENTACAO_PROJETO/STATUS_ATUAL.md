@@ -7,12 +7,12 @@
 | Data | 2026-08-12 |
 | Pasta | `C:\Projetos\meubolso` |
 | Branch | `develop` |
-| HEAD base | `b82e6abbe96ca8220a0fbac39c41969807acc83f` |
-| Release base | `0.68.1` |
-| Recurso JavaScript | `/app.js?v=0.68.1` |
-| Cache PWA | `meu-bolso-v0.68.1` |
-| Runtime | Homologação `ncgfwatsciwzzhqlspvy` |
-| Produção | `hdldbvexlxsbboaxwrut`, proibida para alterações |
+| HEAD atual (`develop` e `main`) | commit único da release `0.68.2` |
+| Release em produção | `0.68.2` |
+| Recurso JavaScript | `/app.js?v=0.68.2` |
+| Cache PWA | `meu-bolso-v0.68.2` |
+| Runtime publicado | Produção `hdldbvexlxsbboaxwrut` |
+| URL de produção | `https://meubolso2.vercel.app` |
 
 ## Arquitetura resumida
 
@@ -87,28 +87,20 @@ Essas contagens são da baseline de 2026-08-08, não uma consulta em tempo real.
 - BUG-007 foi reproduzido: `saveCardPurchase()` atribuía `allInstallmentKeys()` ao status Pago. O formulário agora coleta `Parcelas já pagas`, valida 0 até o total e gera status individual. Treze testes conjuntos passaram; BUG-003 e BUG-007 foram homologados pelo proprietário.
 - A tela Compras do Cartão recebeu filtro visual compacto: Pendentes por padrão, Pagos por quitação total e consulta por competência. O total pendente e as coleções do BUG-003 foram preservados; 18/18 testes passaram.
 - A UX do filtro de Compras do Cartão foi homologada pelo proprietário no servidor oficial 4178: Pendentes, Pagos, competência mensal, classificação de compra parcialmente paga, parcela paga visível em compra ainda pendente, total e visual foram aprovados. O estado formal de BUG-003/007 não foi alterado por esta homologação.
+- BUG-008 foi reproduzido, corrigido e homologado pelo proprietário: parcelas já pagas recuam a partir da competência oficial, usam o vencimento real do cartão e compartilham o mesmo cronograma entre prévia e persistência. Os cenários com vencimentos nos dias 07 e 21 e os estados PAGO/FATURA ATUAL/PRÓXIMA/PENDENTE foram aprovados.
+- BUG-009 foi reproduzido, corrigido e homologado pelo proprietário: receitas mensais possuem identidade estável, edição/exclusão afetam somente a competência atual e futuras, o encerramento persiste em `receitas.recorrencia`, refresh/reload preservam o estado e o histórico anterior permanece intacto.
+- BUG-010 foi reproduzido e implementado localmente: Nova Receita, Nova Despesa e Nova Compra usam rascunho automático em `localStorage`, isolado pelo UUID financeiro e pelo tipo de formulário. Fechar, navegar, atualizar ou reabrir preserva; sucesso limpa; falha e cancelamento simples preservam; descarte explícito limpa após confirmação. Passou em 20/20 testes estruturais e aguarda homologação manual.
 
-## Git
+## Git e produção
 
-Arquivos modificados acumulados antes desta documentação:
-
-```text
-M app.js
-M config.example.js
-M index.html
-M styles.css
-M supabase-config.js
-M supabase/README.md
-M sw.js
-?? BASELINE_PRODUCAO_MEU_BOLSO.md
-?? supabase/migration-auth-foundation-v0.68.0.sql
-?? supabase/migration-remove-installment-date-test-v0.68.0.sql
-?? vendor/
-```
-
-`DOCUMENTACAO_PROJETO/` passa a ser também uma alteração local não commitada.
-
-Não houve commit, push, merge ou deploy das ECs de segurança acumuladas.
+- Release `0.68.1` concluída no commit `3bab0ff1afaadadd0cece225f57a42b3a429c485`.
+- Push concluído; `develop` e `main` ficaram sincronizadas nesse commit.
+- Deploy Vercel concluído em `https://meubolso2.vercel.app`.
+- A produção serve `/app.js?v=0.68.1` e usa o cache `meu-bolso-v0.68.1`.
+- O worktree ficou limpo após a release.
+- BUG-001 a BUG-007 integram a release homologada.
+- Dados dos usuários foram preservados; banco, Auth, RLS e policies não foram alterados durante o deploy.
+- A migration `auth_user_id` foi aplicada anteriormente em produção e não pertenceu ao deploy da release.
 
 ## Estado das fases
 
@@ -128,7 +120,9 @@ Não houve commit, push, merge ou deploy das ECs de segurança acumuladas.
 
 - EC-18.10.3 está implementada tecnicamente e ainda não homologada pelo proprietário.
 - O bloco EC-18 pode ser considerado tecnicamente concluído no objetivo de zero credenciais em runtime.
-- A melhoria visual de Usuários Master aguarda teste manual; BUG-001, BUG-002, BUG-003, BUG-004, BUG-005, BUG-006 e BUG-007 estão homologados. Bundle atual: `0.68.0-bug004-residual-card-notifications`.
+- BUG-001 a BUG-007 permanecem homologados e publicados.
+- BUG-008, BUG-009 e BUG-010 estão homologados e integram a release `0.68.2`.
+- Release `0.68.2` consolida BUG-008, BUG-009 e BUG-010 homologados; versionamento de app, recurso e cache PWA foi atualizado de forma determinística.
 - BUG-004 foi homologado pelo proprietário em 12/08/2026. Nubank apareceu uma única vez como fatura vencida e com R$ 262,50 nas duas telas; Caixa permaneceu como fatura fechada em R$ 62,50, vencendo em 17/08/2026. Competência, total atual e ausência de estado histórico concorrente foram aprovados.
 - UX filtro Compras do Cartão: HOMOLOGADA PELO PROPRIETÁRIO.
 - RLS não pode ser ativada enquanto os fluxos não estiverem prontos.
@@ -139,7 +133,7 @@ Não houve commit, push, merge ou deploy das ECs de segurança acumuladas.
 - `schema.sql` e `supabase/schema.sql` são snapshots históricos e não contêm a fundação `auth_user_id`; essa evolução está na migration separada de Auth.
 - Os dois schemas históricos contêm uma credencial bootstrap Master fixa. O valor não deve ser exposto nem reutilizado. O risco é crítico e permanece sem correção nesta auditoria.
 
-## Bloqueio de release — compatibilidade de schema
+## Compatibilidade de schema da release publicada
 
 - Produção (`hdldbvexlxsbboaxwrut`) possui 6 usuários financeiros, 0 usuários Auth e agora possui `public.usuarios.auth_user_id uuid NULL`.
 - Homologação (`ncgfwatsciwzzhqlspvy`) possui a coluna `uuid`, nullable, sem default, com 8 usuários financeiros: 1 vinculado e 7 Legacy.
@@ -148,6 +142,6 @@ Não houve commit, push, merge ou deploy das ECs de segurança acumuladas.
 - A projeção efetiva de 11 campos e o filtro Legacy funcionam em produção sem `42703`.
 - A configuração local de produção foi preparada e validada com `authDualLoginEnabled: false` e `userProfileAddressFieldsEnabled: false`.
 - A tela de login e a consulta real de usuário inexistente carregaram contra produção sem `42703`; nenhum login real foi executado.
-- Release `0.68.1` autorizada para staging controlado, commit, push e deploy após validações finais.
+- Release `0.68.1` publicada após staging e validações finais; o schema compatível foi preservado sem escrita de banco durante o deploy.
 - Referência detalhada: `COMPATIBILIDADE_SCHEMA_AUTH_USER_ID_PRODUCAO.md`.
 - Auditoria completa: `COMPATIBILIDADE_PUBLIC_USER_FIELDS_PRODUCAO.md`.

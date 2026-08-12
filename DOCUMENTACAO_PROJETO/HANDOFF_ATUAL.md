@@ -10,6 +10,24 @@ Método operacional oficial: `METODO_OFICIAL_DE_TRABALHO.md`. Ele estabelece res
 
 Servidor local oficial permanente: `http://127.0.0.1:4178/`, servindo `C:\Projetos\meubolso`. Não usar `file://` nem criar nova porta por rodada. Antes de testar, comprovar que os arquivos HTTP correspondem ao worktree atual, preservando localStorage, sessão e cache útil.
 
+## Estado da release 0.68.2
+
+- BUG-008, BUG-009 e BUG-010 homologados integram a release `0.68.2`.
+- Recurso: `/app.js?v=0.68.2`.
+- Cache PWA: `meu-bolso-v0.68.2`.
+- Banco, Auth, RLS e policies permanecem inalterados pela release.
+
+## Histórico da release 0.68.1
+
+- Commit final: `3bab0ff1afaadadd0cece225f57a42b3a429c485`.
+- Push concluído; `develop` e `main` sincronizadas.
+- Deploy Vercel concluído em `https://meubolso2.vercel.app`.
+- Produção servindo `/app.js?v=0.68.1` com cache `meu-bolso-v0.68.1`.
+- BUG-001 a BUG-007 incluídos na release homologada.
+- Worktree limpo após a publicação.
+- Dados dos usuários preservados; banco, Auth, RLS e policies não foram alterados durante a release.
+- A migration `auth_user_id` ocorreu antes da release e não fez parte do deploy.
+
 ## O que acabou de ser feito?
 
 Diagnóstico runtime conjunto do BUG-002 e BUG-005 concluído:
@@ -37,6 +55,15 @@ Diagnóstico runtime conjunto do BUG-002 e BUG-005 concluído:
 - 13 testes conjuntos passaram; BUG-003 e BUG-007 foram posteriormente homologados pelo proprietário.
 - filtro visual compacto adicionado a Compras do Cartão: Pendentes padrão, Pagos por quitação total e competência mensal; 18/18 testes estruturais passaram.
 - a UX do filtro preservou BUG-003/007; ambos foram posteriormente homologados pelo proprietário.
+- BUG-008 foi reproduzido em `saveCardPurchase()`: a primeira parcela usava o fechamento futuro e as N primeiras chaves futuras eram marcadas como pagas.
+- BUG-008 agora recua N competências a partir de `cardInvoiceTargetMonth()`, usa o vencimento real do cartão e mostra uma prévia recolhível alimentada pelo mesmo cronograma persistido.
+- Testes estruturais de 6x/0, 6x/1, 6x/3, 6x/6, 12x/5, vencimento futuro/vencido, virada de ano, fevereiro bissexto e prévia=persistência passaram.
+- BUG-008 foi homologado pelo proprietário: os vencimentos nos dias 07 e 21, o recuo das parcelas pagas, a competência atual, os estados e a prévia discreta/recolhível foram aprovados. BUG-003, BUG-004 e BUG-007 permaneceram preservados.
+- BUG-009 foi reproduzido: receitas usavam identidade derivada de campos mutáveis, não possuíam encerramento persistente e não participavam dos planos temporais do BUG-001.
+- BUG-009 agora persiste identidade/encerramento em `receitas.recorrencia`, altera ou encerra somente a competência atual e futuras e preserva o passado. Os cards mostram Mensal/Não repete discretamente.
+- 20/20 testes estruturais passaram.
+- BUG-009 foi homologado pelo proprietário: Mensal → Não repete, salvamento, refresh/reload, exclusão sem reaparecimento, regra atual+futuras, histórico anterior e tipo de repetição no card foram aprovados. BUG-001 e BUG-008 permaneceram preservados.
+- BUG-010 foi homologado pelo proprietário para Nova Receita, Nova Despesa e Nova Compra. Navegação, refresh, restauração, campos dinâmicos, Prévia do BUG-008, descarte, limpeza após salvamento e isolamento entre usuários foram aprovados.
 - a UX do filtro de Compras do Cartão foi homologada pelo proprietário: Pendentes, Pagos, mês, compra parcialmente paga, parcela paga visível, total pendente e visual discreto aprovados.
 - a homologação específica da UX não alterou os bugs naquele momento; a homologação formal posterior de BUG-003/007 está registrada nos documentos próprios.
 
@@ -69,7 +96,7 @@ BUG-001, BUG-002, BUG-003, BUG-004, BUG-005, BUG-006 e BUG-007 estão homologado
 
 ## Escopo exato preservado
 
-- Preservar o recurso `/app.js?v=0.68.0-bug004-residual-card-notifications` e a origem oficial 4178.
+  - Preservar o recurso publicado `/app.js?v=0.68.2`; a origem 4178 permanece como servidor local oficial para validações.
 - Preservar a homologação do centro: Nubank vencido único em R$ 262,50 e Caixa fechada em R$ 62,50.
 - Preservar BUG-003, BUG-006 e BUG-007.
 
@@ -97,7 +124,7 @@ BUG-001, BUG-002, BUG-003, BUG-004, BUG-005, BUG-006 e BUG-007 estão homologado
 - RLS ausente;
 - sete usuários legacy na homologação, conforme leitura de 12/08/2026;
 - duplicidades financeiras preservadas na baseline;
-- worktree acumulado sem commit.
+- RLS permanece ausente e exige preparação própria antes de futura ativação.
 
 ## Informações operacionais de encerramento
 
@@ -105,12 +132,11 @@ Saldo de créditos, nome de ZIP utilizado/gerado e estado operacional de cada en
 
 ## Versionamento técnico
 
-- Versão funcional preparada: `0.68.1`.
-- Recurso preparado: `/app.js?v=0.68.1`.
-- Cache preparado: `meu-bolso-v0.68.1`.
+- Versão publicada: `0.68.2`.
+- Recurso em produção: `/app.js?v=0.68.2`.
+- Cache em produção: `meu-bolso-v0.68.2`.
+- Estratégia PWA: network-first; caches antigos são removidos na ativação. Uma PWA já aberta pode precisar ser fechada e aberta uma vez, sem limpeza manual de cache em condições normais.
 
 ## Próxima ação
 
-Revisar o resultado pré-release e decidir se autoriza commit, push e deploy da configuração e do bundle homologados.
-
-A migration de `auth_user_id` já foi aplicada e validada em produção. A configuração local agora aponta para produção, mantém Auth dual desativado e desativa explicitamente os três campos de endereço. O bundle abriu a tela de login e executou a projeção real sem `42703`. Login real, Master e telas financeiras não foram abertos por ausência de credencial autorizada. Não houve commit, push ou deploy.
+O proprietário deve validar rapidamente a produção `0.68.2` e enviar o resultado ao ChatGPT para revisão final. Não iniciar BUG-011 automaticamente.
