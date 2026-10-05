@@ -3376,7 +3376,7 @@ function shellTemplate() {
           ${activeNotifications ? `<span>${activeNotifications > 9 ? "9+" : activeNotifications}</span>` : ""}
         </button>
       </header>` : ""}
-      ${(isOfflineMode || hasOfflineQueue()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
+      ${(isOfflineMode || hasPendingQueueForCurrentContext()) ? `<div class="offline-banner">Você está offline. As alterações serão sincronizadas quando a internet voltar.</div>` : ""}
       <section class="page">${viewTemplate()}</section>
       ${!masterContext ? `<button class="fab" data-add aria-label="Adicionar movimentação">+</button>` : ""}
       <nav class="bottom-nav ${masterContext ? "master-nav" : "user-nav"}">
@@ -9346,6 +9346,7 @@ if ("serviceWorker" in navigator) {
 window.addEventListener("load", () => autoCheckAppUpdates());
 window.addEventListener("online", async () => {
   isOfflineMode = false;
+  render();
   await syncOfflineQueue();
   autoCheckAppUpdates();
 });
