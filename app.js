@@ -13,16 +13,33 @@ const APP_UPDATED_AT = "16/07/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
 const AUTH_DUAL_LOGIN_ENABLED = SUPABASE_CONFIG.authDualLoginEnabled === true;
-const AUTH_DUAL_LOGIN_PROJECT_REF = "ncgfwatsciwzzhqlspvy";
-const AUTH_DUAL_LOGIN_CONFIG_VALID = !AUTH_DUAL_LOGIN_ENABLED || (
-  SUPABASE_CONFIG.projectRef === AUTH_DUAL_LOGIN_PROJECT_REF
-  && SUPABASE_CONFIG.url === `https://${AUTH_DUAL_LOGIN_PROJECT_REF}.supabase.co`
+const LEGACY_AUTH_MIGRATION_ENABLED = SUPABASE_CONFIG.legacyAuthMigrationEnabled === true;
+const SUPABASE_PROJECT_REFS_BY_ENVIRONMENT = Object.freeze({
+  homologation: "ncgfwatsciwzzhqlspvy",
+  production: "hdldbvexlxsbboaxwrut"
+});
+const SUPABASE_ENVIRONMENT = String(SUPABASE_CONFIG.environment || "").trim().toLowerCase();
+const EXPECTED_SUPABASE_PROJECT_REF = SUPABASE_PROJECT_REFS_BY_ENVIRONMENT[SUPABASE_ENVIRONMENT] || "";
+const SUPABASE_ENVIRONMENT_CONFIG_VALID = Boolean(
+  EXPECTED_SUPABASE_PROJECT_REF
+  && SUPABASE_CONFIG.projectRef === EXPECTED_SUPABASE_PROJECT_REF
+  && SUPABASE_CONFIG.url === `https://${EXPECTED_SUPABASE_PROJECT_REF}.supabase.co`
 );
+const AUTH_DUAL_LOGIN_CONFIG_VALID = !AUTH_DUAL_LOGIN_ENABLED || (
+  SUPABASE_ENVIRONMENT_CONFIG_VALID
+);
+const LEGACY_AUTH_MIGRATION_READY = AUTH_DUAL_LOGIN_ENABLED
+  && LEGACY_AUTH_MIGRATION_ENABLED
+  && AUTH_DUAL_LOGIN_CONFIG_VALID;
+const LEGACY_VERIFIABLE_SESSION_ENABLED = SUPABASE_CONFIG.legacyVerifiableSessionEnabled === true
+  && SUPABASE_ENVIRONMENT_CONFIG_VALID;
+const LEGACY_AUTH_MIGRATION_FUNCTION = "legacy-auth-migrate";
 const AUTH_SESSION_MODE = "auth";
 const LEGACY_SESSION_MODE = "legacy";
 const MASTER_VIEW_MODE = "master";
 const USER_VIEW_MODE = "user";
 const SESSION_VERSION = 3;
+const LEGACY_VERIFIABLE_SESSION_VERSION = 4;
 const REST_REQUEST_TIMEOUT_MS = 15000;
 const USER_PROFILE_ADDRESS_FIELDS_ENABLED = SUPABASE_CONFIG.userProfileAddressFieldsEnabled !== false;
 const USER_PROFILE_ADDRESS_FIELDS = ["endereco", "cidade", "estado"];
@@ -65,6 +82,8 @@ let dueNotificationTimer = null;
 let removedSensitiveOfflineOperations = 0;
 let databaseLoadGeneration = 0;
 const activeDatabaseLoads = new Map();
+let viewModeTransitionSequence = 0;
+let activeViewModeTransition = null;
 let activeAutoUpdatePromise = null;
 
 const seed = {
@@ -106,6 +125,7 @@ const initialSavedSession = loadSavedSession();
 let session = initialSavedSession?.financialUserId || initialSavedSession?.id || null;
 let sessionMode = initialSavedSession?.authMode || initialSavedSession?.mode || LEGACY_SESSION_MODE;
 let sessionAuthUserId = initialSavedSession?.authUserId || null;
+let sessionLegacyToken = initialSavedSession?.sessionToken || null;
 let viewMode = [MASTER_VIEW_MODE, USER_VIEW_MODE].includes(initialSavedSession?.viewMode) ? initialSavedSession.viewMode : USER_VIEW_MODE;
 let isBooting = true;
 let lastSyncError = "";
@@ -121,6 +141,7 @@ let editingTransactionId = null;
 let editingUserId = null;
 let userFormOpen = false;
 let activeUserSavePromise = null;
+let activePublicRegistrationPromise = null;
 let userFiltersOpen = false;
 let userListScope = "all";
 let userSearch = "";
@@ -149,6 +170,8 @@ let overdueExpandedCardIds = new Set();
 let expandedRegisteredCardId = null;
 let profileDashboardDetailType = null;
 let renewTargetUserId = null;
+let renewalOperationSequence = 0;
+const activeRenewalOperations = new Map();
 let activeListType = "categories";
 let editingListItem = null;
 let preferredCategory = "";
@@ -240,6 +263,13 @@ function loadSavedSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
     const savedAuthMode = saved?.authMode || saved?.mode;
+    if (LEGACY_VERIFIABLE_SESSION_ENABLED && savedAuthMode === LEGACY_SESSION_MODE) {
+      if (saved?.version !== LEGACY_VERIFIABLE_SESSION_VERSION || !isValidLegacySessionToken(saved?.sessionToken)) {
+        localStorage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return { ...saved, authMode: LEGACY_SESSION_MODE };
+    }
     if (saved?.version === SESSION_VERSION && saved?.financialUserId && [AUTH_SESSION_MODE, LEGACY_SESSION_MODE].includes(savedAuthMode)) {
       return { ...saved, authMode: savedAuthMode };
     }
@@ -266,22 +296,30 @@ function normalizeViewModeForUser(user, requestedViewMode = viewMode) {
   return requestedViewMode === USER_VIEW_MODE ? USER_VIEW_MODE : MASTER_VIEW_MODE;
 }
 
-function saveSession(user, { mode = sessionMode, authUserId = sessionAuthUserId, requestedViewMode = viewMode } = {}) {
+function saveSession(user, { mode = sessionMode, authUserId = sessionAuthUserId, legacyToken = sessionLegacyToken, requestedViewMode = viewMode } = {}) {
   if (!user?.id) return;
   const normalizedMode = mode === AUTH_SESSION_MODE ? AUTH_SESSION_MODE : LEGACY_SESSION_MODE;
+  if (normalizedMode === LEGACY_SESSION_MODE && LEGACY_VERIFIABLE_SESSION_ENABLED && !isValidLegacySessionToken(legacyToken)) {
+    throw new Error("LEGACY_SESSION_REQUIRED");
+  }
   session = user.id;
   sessionMode = normalizedMode;
   sessionAuthUserId = normalizedMode === AUTH_SESSION_MODE ? authUserId || user.authUserId || null : null;
+  sessionLegacyToken = normalizedMode === LEGACY_SESSION_MODE && LEGACY_VERIFIABLE_SESSION_ENABLED ? legacyToken : null;
   viewMode = normalizeViewModeForUser(user, requestedViewMode);
-  localStorage.setItem(SESSION_KEY, JSON.stringify({
-    version: SESSION_VERSION,
+  const savedSession = {
+    version: normalizedMode === LEGACY_SESSION_MODE && LEGACY_VERIFIABLE_SESSION_ENABLED
+      ? LEGACY_VERIFIABLE_SESSION_VERSION
+      : SESSION_VERSION,
     authMode: sessionMode,
     financialUserId: user.id,
     authUserId: sessionAuthUserId,
     username: user.username,
     viewMode,
     savedAt: new Date().toISOString()
-  }));
+  };
+  if (sessionLegacyToken) savedSession.sessionToken = sessionLegacyToken;
+  localStorage.setItem(SESSION_KEY, JSON.stringify(savedSession));
 }
 
 function clearSession() {
@@ -300,7 +338,7 @@ function sanitizeCredentialFields(value, seen = new WeakMap()) {
   const sanitized = Array.isArray(value) ? [] : {};
   seen.set(value, sanitized);
   Object.entries(value).forEach(([key, item]) => {
-    if (["password", "senha"].includes(key.toLocaleLowerCase("pt-BR"))) return sanitized;
+    if (["password", "senha", "sessiontoken", "session_token", "token_hash"].includes(key.toLocaleLowerCase("pt-BR"))) return sanitized;
     sanitized[key] = sanitizeCredentialFields(item, seen);
   });
   return sanitized;
@@ -315,7 +353,7 @@ function containsCredentialField(value, seen = new WeakSet()) {
   if (!value || typeof value !== "object" || seen.has(value)) return false;
   seen.add(value);
   return Object.entries(value).some(([key, item]) => {
-    if (["password", "senha"].includes(key.toLocaleLowerCase("pt-BR"))) return true;
+    if (["password", "senha", "sessiontoken", "session_token", "token_hash"].includes(key.toLocaleLowerCase("pt-BR"))) return true;
     return containsCredentialField(item, seen);
   });
 }
@@ -485,13 +523,22 @@ function databaseLoadContext(financialUserId, contextScope = viewMode) {
   return {
     financialUserId,
     authMode: sessionMode,
+    authUserId: sessionAuthUserId,
+    legacyToken: sessionLegacyToken,
     contextScope,
     generation: databaseLoadGeneration
   };
 }
 
 function databaseLoadContextKey(context) {
-  return [context.financialUserId, context.authMode, context.contextScope, context.generation].join("|");
+  return [
+    context.financialUserId,
+    context.authMode,
+    context.authUserId || "",
+    context.legacyToken || "",
+    context.contextScope,
+    context.generation
+  ].join("|");
 }
 
 function isDatabaseLoadContextCurrent(context) {
@@ -499,6 +546,8 @@ function isDatabaseLoadContextCurrent(context) {
     context?.financialUserId
     && context.financialUserId === session
     && context.authMode === sessionMode
+    && context.authUserId === sessionAuthUserId
+    && context.legacyToken === sessionLegacyToken
     && context.contextScope === viewMode
     && context.generation === databaseLoadGeneration
   );
@@ -539,22 +588,12 @@ async function coordinateDatabaseLoad(loggedUser, contextScope, buildDatabase) {
 
 async function loadDatabase() {
   if (!SUPABASE_READY) throw new Error("Supabase não configurado.");
-  const cached = loadCachedDatabase();
-  if (!navigator.onLine && cached) {
-    isOfflineMode = true;
-    return cached;
+  if (!session) {
+    localStorage.removeItem(LOCAL_DB_KEY);
   }
-  if (session) {
-    const user = await loadUserById(session);
-    if (user) return loadScopedDatabase(user);
-  }
-  const generation = databaseLoadGeneration;
-  const usuarios = await supabaseSelect("usuarios", `select=${PUBLIC_USER_FIELDS}`);
-  const loaded = normalizeDatabase(fromSupabaseRows({ usuarios, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }));
-  if (generation !== databaseLoadGeneration || session) return db;
-  db = loaded;
-  cacheDatabase();
-  return loaded;
+  // Esta função não resolve identidade nem escopo por UUID controlado pelo cliente.
+  // Sessões válidas são carregadas por loadCurrentAuthUser/loadCurrentLegacyUser.
+  return emptyDatabase();
 }
 
 async function loadScopedDatabase(loggedUser) {
@@ -564,101 +603,283 @@ async function loadScopedDatabase(loggedUser) {
 
 async function loadMasterDatabase(loggedUser) {
   if (loggedUser?.role !== "master" || viewMode !== MASTER_VIEW_MODE) throw new Error("Contexto Master Global não autorizado.");
-  return coordinateDatabaseLoad(loggedUser, MASTER_VIEW_MODE, async () => {
-    const [usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
-      supabaseSelect("usuarios", `select=${PUBLIC_USER_FIELDS}`),
-      supabaseSelect("receitas", "select=*"),
-      supabaseSelect("despesas", "select=*"),
-      supabaseSelect("cartoes", "select=*"),
-      supabaseSelect("compras_cartao", "select=*"),
-      supabaseSelect("parcelas", "select=*"),
-      supabaseSelect("suporte", "select=*"),
-      supabaseSelect("renovacoes", "select=*"),
-      supabaseSelect("categorias", "select=*"),
-      supabaseSelect("tipos_conta", "select=*")
-    ]);
-    const masterDatabase = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
-    masterDatabase.users = masterDatabase.users.map(user => sanitizeCredentialFields(user));
-    return masterDatabase;
-  });
+  return coordinateDatabaseLoad(loggedUser, MASTER_VIEW_MODE, buildMasterDatabase);
+}
+
+async function buildMasterDatabase(masterTransitionContext = null) {
+  const [usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
+    loadAdminUsersFromSupabase(masterTransitionContext),
+    supabaseSelect("receitas", "select=*"),
+    supabaseSelect("despesas", "select=*"),
+    supabaseSelect("cartoes", "select=*"),
+    supabaseSelect("compras_cartao", "select=*"),
+    supabaseSelect("parcelas", "select=*"),
+    supabaseSelect("suporte", "select=*"),
+    supabaseSelect("renovacoes", "select=*"),
+    supabaseSelect("categorias", "select=*"),
+    supabaseSelect("tipos_conta", "select=*")
+  ]);
+  const masterDatabase = normalizeDatabase(fromSupabaseRows({ usuarios, receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta }));
+  masterDatabase.users = masterDatabase.users.map(user => sanitizeCredentialFields(user));
+  return masterDatabase;
 }
 
 async function loadPersonalDatabase(loggedUser) {
   if (!loggedUser?.id) throw new Error("Usuário não encontrado no Supabase.");
-  return coordinateDatabaseLoad(loggedUser, USER_VIEW_MODE, async () => {
-    const userFilter = `usuario_id=eq.${loggedUser.id}`;
-    const [receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
-      supabaseSelect("receitas", selectWithFilter(userFilter)),
-      supabaseSelect("despesas", selectWithFilter(userFilter)),
-      supabaseSelect("cartoes", selectWithFilter(userFilter)),
-      supabaseSelect("compras_cartao", selectWithFilter(userFilter)),
-      supabaseSelect("parcelas", selectWithFilter(userFilter)),
-      supabaseSelect("suporte", selectWithFilter(userFilter)),
-      supabaseSelect("renovacoes", selectWithFilter(userFilter)),
-      supabaseSelect("categorias", selectWithFilter(userFilter)),
-      supabaseSelect("tipos_conta", selectWithFilter(userFilter))
-    ]);
-    const personalDatabase = fromSupabaseRows({
-      usuarios: [],
-      receitas,
-      despesas,
-      cartoes,
-      compras,
-      parcelas,
-      suporte,
-      renovacoes,
-      categorias,
-      tiposConta
-    });
-    personalDatabase.users = [sanitizeCredentialFields(loggedUser)];
-    const normalizedPersonalDatabase = normalizeDatabase(personalDatabase);
-    normalizedPersonalDatabase.users = normalizedPersonalDatabase.users.map(user => sanitizeCredentialFields(user));
-    return normalizedPersonalDatabase;
+  return coordinateDatabaseLoad(loggedUser, USER_VIEW_MODE, () => buildPersonalDatabase(loggedUser));
+}
+
+async function buildPersonalDatabase(loggedUser) {
+  if (!loggedUser?.id) throw new Error("Usuário não encontrado no Supabase.");
+  const userFilter = `usuario_id=eq.${loggedUser.id}`;
+  const [receitas, despesas, cartoes, compras, parcelas, suporte, renovacoes, categorias, tiposConta] = await Promise.all([
+    supabaseSelect("receitas", selectWithFilter(userFilter)),
+    supabaseSelect("despesas", selectWithFilter(userFilter)),
+    supabaseSelect("cartoes", selectWithFilter(userFilter)),
+    supabaseSelect("compras_cartao", selectWithFilter(userFilter)),
+    supabaseSelect("parcelas", selectWithFilter(userFilter)),
+    supabaseSelect("suporte", selectWithFilter(userFilter)),
+    supabaseSelect("renovacoes", selectWithFilter(userFilter)),
+    supabaseSelect("categorias", selectWithFilter(userFilter)),
+    supabaseSelect("tipos_conta", selectWithFilter(userFilter))
+  ]);
+  const personalDatabase = fromSupabaseRows({
+    usuarios: [],
+    receitas,
+    despesas,
+    cartoes,
+    compras,
+    parcelas,
+    suporte,
+    renovacoes,
+    categorias,
+    tiposConta
   });
+  personalDatabase.users = [sanitizeCredentialFields(loggedUser)];
+  const normalizedPersonalDatabase = normalizeDatabase(personalDatabase);
+  normalizedPersonalDatabase.users = normalizedPersonalDatabase.users.map(user => sanitizeCredentialFields(user));
+  return normalizedPersonalDatabase;
 }
 
 async function refreshMasterData() {
-  const user = await loadUserById(session);
-  if (!user || user.role !== "master" || viewMode !== MASTER_VIEW_MODE) throw new Error("Contexto Master Global não autorizado.");
-  await loadMasterDatabase(user);
+  const context = currentUserRefreshContext();
+  const user = await resolveCurrentMasterForRefresh(context);
+  if (!isCurrentUserRefreshContextCurrent(context)) throw new Error("Contexto Master alterado.");
+
+  const nextDb = await buildMasterDatabase();
+  if (!isCurrentUserRefreshContextCurrent(context)) throw new Error("Contexto Master alterado.");
+
+  const confirmedUser = await resolveCurrentMasterForRefresh(context);
+  if (!isCurrentUserRefreshContextCurrent(context)
+      || confirmedUser.id !== user.id
+      || confirmedUser.authUserId !== user.authUserId) {
+    throw new Error("Autoridade Master alterada.");
+  }
+
+  db = nextDb;
+  isOfflineMode = false;
+  cacheDatabase();
+  logSupabaseLoad(confirmedUser, db);
+  return db;
+}
+
+function currentUserRefreshContext() {
+  return {
+    financialUserId: session,
+    authMode: sessionMode,
+    authUserId: sessionAuthUserId,
+    legacyToken: sessionLegacyToken,
+    contextScope: viewMode,
+    generation: databaseLoadGeneration
+  };
+}
+
+function isCurrentUserRefreshContextCurrent(context) {
+  return Boolean(
+    context?.financialUserId
+    && context.financialUserId === session
+    && context.authMode === sessionMode
+    && context.authUserId === sessionAuthUserId
+    && context.legacyToken === sessionLegacyToken
+    && context.contextScope === viewMode
+    && context.generation === databaseLoadGeneration
+  );
+}
+
+async function resolveCurrentMasterForRefresh(context, isContextCurrent = isCurrentUserRefreshContextCurrent) {
+  if (context?.contextScope !== MASTER_VIEW_MODE || !isContextCurrent(context)) {
+    throw new Error("Contexto Master não autorizado.");
+  }
+
+  if (context.authMode === AUTH_SESSION_MODE) {
+    if (!AUTH_DUAL_LOGIN_ENABLED || !context.authUserId) throw new Error("Sessão Auth inválida.");
+    const [user, isMaster] = await Promise.all([
+      loadCurrentAuthUser(),
+      supabaseRpc("meu_bolso_is_master")
+    ]);
+    if (!isContextCurrent(context)
+        || isMaster !== true
+        || !user
+        || user.id !== context.financialUserId
+        || user.authUserId !== context.authUserId
+        || user.role !== "master"
+        || user.blocked) {
+      throw new Error("Contexto Master não autorizado.");
+    }
+    return user;
+  }
+
+  if (context.authMode === LEGACY_SESSION_MODE) {
+    if (!LEGACY_VERIFIABLE_SESSION_ENABLED || !isValidLegacySessionToken(context.legacyToken)) {
+      throw new Error("Sessão Legacy Master verificável obrigatória.");
+    }
+    const user = await loadCurrentLegacyMasterUser(context.legacyToken);
+    if (!isContextCurrent(context)
+        || !user
+        || user.id !== context.financialUserId
+        || user.authUserId
+        || user.role !== "master"
+        || user.blocked) {
+      throw new Error("Contexto Master não autorizado.");
+    }
+    return user;
+  }
+
+  throw new Error("Sessão Master inválida.");
+}
+
+async function resolveCurrentUserForRefresh(context) {
+  if (context?.contextScope !== USER_VIEW_MODE) throw new Error("Contexto pessoal não autorizado.");
+
+  if (context.authMode === AUTH_SESSION_MODE) {
+    if (!AUTH_DUAL_LOGIN_ENABLED || !context.authUserId) throw new Error("Sessão Auth inválida.");
+    const user = await loadCurrentAuthUser();
+    if (!user || user.authUserId !== context.authUserId) throw new Error("Sessão Auth inválida.");
+    return user;
+  }
+
+  if (context.authMode === LEGACY_SESSION_MODE) {
+    if (!LEGACY_VERIFIABLE_SESSION_ENABLED || !isValidLegacySessionToken(context.legacyToken)) {
+      throw new Error("Sessão Legacy verificável obrigatória.");
+    }
+    return loadCurrentLegacyUser(context.legacyToken);
+  }
+
+  throw new Error("Sessão inválida.");
 }
 
 async function refreshCurrentUserData() {
-  const user = await loadUserById(session);
-  if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
-  if (viewMode === MASTER_VIEW_MODE) await loadMasterDatabase(user);
-  else await loadPersonalDatabase(user);
-}
-
-async function refreshUserFinancialData() {
-  if (!navigator.onLine) {
-    isOfflineMode = true;
-    await ensureMonthlyOccurrences(session);
-    cacheDatabase();
-    return;
+  const context = currentUserRefreshContext();
+  const user = await resolveCurrentUserForRefresh(context);
+  if (!isCurrentUserRefreshContextCurrent(context)) throw new Error("Contexto da sessão alterado.");
+  if (!user || user.id !== context.financialUserId || user.blocked || isExpired(user)) {
+    throw new Error("Usuário logado não encontrado ou sem acesso.");
   }
-  const user = currentUser() || await loadUserById(session);
-  if (!user) throw new Error("Usuário logado não encontrado no Supabase.");
   await loadPersonalDatabase(user);
+  if (!isCurrentUserRefreshContextCurrent(context)) throw new Error("Contexto da sessão alterado.");
+  return user;
 }
 
-async function loadUserById(id) {
-  if (!id) return null;
-  const rows = await supabaseSelect("usuarios", `select=${PUBLIC_USER_FIELDS}&id=eq.${encodeURIComponent(id)}&limit=1`);
-  const user = rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
-  return user ? sanitizeCredentialFields(user) : null;
+function isVerifiedPersonalRefreshUser(user, context) {
+  if (!user
+      || !isCurrentUserRefreshContextCurrent(context)
+      || context.contextScope !== USER_VIEW_MODE
+      || user.id !== context.financialUserId
+      || user.blocked
+      || isExpired(user)) {
+    return false;
+  }
+  if (context.authMode === AUTH_SESSION_MODE) return Boolean(context.authUserId && user.authUserId === context.authUserId);
+  if (context.authMode === LEGACY_SESSION_MODE) return Boolean(context.legacyToken && !user.authUserId);
+  return false;
 }
 
-async function loadUserByUsername(username) {
-  const query = `select=${PUBLIC_USER_FIELDS}&usuario=eq.${encodeURIComponent(username)}&limit=1`;
-  const rows = await supabaseSelect("usuarios", query);
-  return rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+async function resolveVerifiedPersonalRefreshUser(context) {
+  if (!isCurrentUserRefreshContextCurrent(context)) throw new Error("Contexto da sessão alterado.");
+  const user = await resolveCurrentUserForRefresh(context);
+  if (!isVerifiedPersonalRefreshUser(user, context)) throw new Error("Usuário logado não encontrado ou sem acesso.");
+  return user;
 }
 
-async function loadRenewalById(renewalId) {
-  if (!renewalId) return null;
-  const rows = await supabaseSelect("renovacoes", `select=id,usuario_id,data_renovacao,nova_validade,valor&id=eq.${encodeURIComponent(renewalId)}&limit=1`);
-  return rows[0] || null;
+function personalRefreshLoadKey(context) {
+  return [
+    "verified-personal",
+    context.financialUserId,
+    context.authMode,
+    context.authUserId || "",
+    context.legacyToken ? stableHashHex(context.legacyToken) : "",
+    context.contextScope,
+    context.generation
+  ].join("|");
+}
+
+async function loadVerifiedPersonalDatabase(user, context) {
+  const key = personalRefreshLoadKey(context);
+  const activeLoad = activeDatabaseLoads.get(key);
+  if (activeLoad) return activeLoad.promise;
+
+  const promise = (async () => {
+    const nextDb = await buildPersonalDatabase(user);
+    const confirmedUser = await resolveVerifiedPersonalRefreshUser(context);
+    if (confirmedUser.id !== user.id || confirmedUser.authUserId !== user.authUserId) {
+      throw new Error("Identidade financeira alterada.");
+    }
+
+    const occurrences = await ensureMonthlyOccurrences(user.id, dateOffset(), {
+      database: nextDb,
+      isContextCurrent: () => isCurrentUserRefreshContextCurrent(context),
+      persistCache: false,
+      recordActivity: false
+    });
+    if (!isCurrentUserRefreshContextCurrent(context)) throw new Error("Contexto da sessão alterado.");
+
+    const finalUser = await resolveVerifiedPersonalRefreshUser(context);
+    if (finalUser.id !== confirmedUser.id || finalUser.authUserId !== confirmedUser.authUserId) {
+      throw new Error("Identidade financeira alterada.");
+    }
+
+    nextDb.users = [sanitizeCredentialFields(finalUser)];
+    db = nextDb;
+    isOfflineMode = false;
+    cacheDatabase();
+    occurrences.incomes.forEach(item => logActivity(`Gerou receita mensal ${item.name} para ${item.dueDate.slice(0, 7)}.`, finalUser.id));
+    occurrences.expenses.forEach(item => logActivity(`Gerou despesa mensal ${item.name} para ${item.dueDate.slice(0, 7)}.`, finalUser.id));
+    logSupabaseLoad(finalUser, db);
+    return db;
+  })();
+
+  activeDatabaseLoads.set(key, { context, promise });
+  try {
+    return await promise;
+  } finally {
+    if (activeDatabaseLoads.get(key)?.promise === promise) activeDatabaseLoads.delete(key);
+  }
+}
+
+function hasVerifiableOfflinePersonalContext(context) {
+  if (!isCurrentUserRefreshContextCurrent(context) || context.contextScope !== USER_VIEW_MODE) return false;
+  if (context.authMode === AUTH_SESSION_MODE) return AUTH_DUAL_LOGIN_ENABLED && Boolean(context.authUserId);
+  if (context.authMode === LEGACY_SESSION_MODE) {
+    return LEGACY_VERIFIABLE_SESSION_ENABLED && isValidLegacySessionToken(context.legacyToken);
+  }
+  return false;
+}
+
+async function refreshUserFinancialData({ primaryOperationPersisted = false } = {}) {
+  const context = currentUserRefreshContext();
+  try {
+    if (!navigator.onLine) {
+      if (!hasVerifiableOfflinePersonalContext(context)) throw new Error("Sessão verificável necessária para uso offline.");
+      isOfflineMode = true;
+      return db;
+    }
+    const user = await resolveVerifiedPersonalRefreshUser(context);
+    return await loadVerifiedPersonalDatabase(user, context);
+  } catch (error) {
+    if (!primaryOperationPersisted) throw error;
+    console.warn("[MEU BOLSO][Sincronização] operação principal confirmada; atualização financeira pendente", error?.name || "REFRESH_FAILED");
+    return db;
+  }
 }
 
 async function saveRenewalToSupabase(renewal) {
@@ -677,80 +898,387 @@ async function saveRenewalToSupabase(renewal) {
   });
 }
 
-async function loadUserByAuthId(authUserId) {
-  if (!authUserId) return null;
-  const query = `select=${PUBLIC_USER_FIELDS}&auth_user_id=eq.${encodeURIComponent(authUserId)}&limit=1`;
-  const rows = await supabaseSelect("usuarios", query);
+async function loadCurrentAuthUser() {
+  const result = await supabaseRpc("meu_bolso_current_user_profile");
+  const rows = Array.isArray(result) ? result : [];
   return rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
 }
 
-async function loadLegacyUserByCredentials(username, password) {
-  const query = `select=${PUBLIC_USER_FIELDS}&usuario=eq.${encodeURIComponent(username)}&senha=eq.${encodeURIComponent(password)}&auth_user_id=is.null&limit=1`;
-  const rows = await supabaseSelect("usuarios", query);
-  const user = rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
+function legacyUserFromSessionProfile(profile) {
+  if (!profile || typeof profile !== "object") return null;
+  const user = fromSupabaseRows({ usuarios: [profile], receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0];
   return user ? sanitizeCredentialFields(user) : null;
 }
 
-async function validateLegacyPassword(username, password) {
-  if (!navigator.onLine) throw onlineCredentialOperationError();
-  const query = `select=${PUBLIC_USER_FIELDS}&usuario=eq.${encodeURIComponent(username)}&senha=eq.${encodeURIComponent(password)}&auth_user_id=is.null&limit=1`;
-  const rows = await supabaseSelect("usuarios", query);
-  const user = rows[0] ? fromSupabaseRows({ usuarios: rows, receitas: [], despesas: [], cartoes: [], compras: [], parcelas: [], suporte: [], renovacoes: [], categorias: [], tiposConta: [] }).users[0] : null;
-  return user ? sanitizeCredentialFields(user) : null;
+async function loadCurrentLegacyUser(sessionToken) {
+  if (!LEGACY_VERIFIABLE_SESSION_ENABLED || !isValidLegacySessionToken(sessionToken)) return null;
+  const result = await supabaseRpc("meu_bolso_legacy_current_profile", { p_session_token: sessionToken });
+  if (result?.ok !== true) return null;
+  return legacyUserFromSessionProfile(result.profile);
+}
+
+async function loadCurrentLegacyMasterUser(sessionToken) {
+  if (!LEGACY_VERIFIABLE_SESSION_ENABLED || !isValidLegacySessionToken(sessionToken)) return null;
+  const result = await supabaseRpc("meu_bolso_legacy_current_master_profile", { p_session_token: sessionToken });
+  if (result?.ok !== true) return null;
+  return legacyUserFromSessionProfile(result.profile);
+}
+
+async function revokeLegacySession(sessionToken) {
+  if (!isValidLegacySessionToken(sessionToken) || !navigator.onLine) return false;
+  const result = await supabaseRpc("meu_bolso_legacy_logout", { p_session_token: sessionToken });
+  return result?.ok === true;
+}
+
+async function loadLegacyUserByCredentials(username, password) {
+  const result = await supabaseRpc("meu_bolso_legacy_login", {
+    p_username: username,
+    p_password: password
+  });
+  if (result?.ok !== true) {
+    if (result?.ok === false && ["ACCESS_BLOCKED", "ACCESS_EXPIRED", "TRY_LATER"].includes(result.code)) {
+      const error = new Error(`LEGACY_${result.code}`);
+      error.code = `LEGACY_${result.code}`;
+      throw error;
+    }
+    return null;
+  }
+  if (LEGACY_VERIFIABLE_SESSION_ENABLED) {
+    const token = result.session_token;
+    const expiresAt = Date.parse(result.expires_at || "");
+    const user = legacyUserFromSessionProfile(result.profile);
+    if (!isValidLegacySessionToken(token)
+       || !Number.isFinite(expiresAt)
+       || expiresAt <= Date.now()
+       || !user
+       || user.authUserId
+       || user.username !== String(username).trim().toLowerCase()) {
+      sessionLegacyToken = null;
+      return null;
+    }
+    sessionLegacyToken = token;
+    return user;
+  }
+  if (typeof result.user_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.user_id)) return null;
+  const user = legacyUserFromSessionProfile(result.profile);
+  if (!user
+      || user.id !== result.user_id
+      || user.authUserId
+      || user.username !== String(username).trim().toLowerCase()) return null;
+  return user;
 }
 
 async function updateLegacyPassword(userId, newPassword) {
-  if (!navigator.onLine) throw onlineCredentialOperationError();
-  await supabaseRequest("usuarios", {
-    method: "PATCH",
-    query: supabaseAnd(supabaseEq("id", userId), "auth_user_id=is.null"),
-    body: { senha: newPassword },
-    prefer: "return=minimal",
-    queueOffline: false
+  requireGate9ServerSideOperations();
+  const result = await withLegacyMasterProof(proof => supabaseRpc("meu_bolso_legacy_master_set_password", {
+    ...proof, p_user_id: userId, p_new_password: newPassword
+  }));
+  if (result?.ok !== true) throw new Error("Não foi possível autorizar a alteração da senha.");
+}
+
+async function saveOwnSecurityProfile(user, values) {
+  requireGate9ServerSideOperations();
+  const actorId = user.id;
+  const mode = sessionMode;
+  const profile = { nome: values.name, email: values.email, whatsapp: values.whatsapp, usuario: values.username };
+  if (USER_PROFILE_ADDRESS_FIELDS_ENABLED) {
+    Object.assign(profile, { endereco: values.address, cidade: values.city, estado: values.state });
+  }
+  let password = "";
+  let parameters = null;
+  try {
+    if (mode === AUTH_SESSION_MODE && user.authUserId) {
+      if (session !== actorId) throw new Error("Sessão alterada.");
+      parameters = { p_profile: profile };
+      const result = await supabaseRpc("meu_bolso_update_own_profile", parameters);
+      if (result?.ok !== true) throw new Error("PROFILE_UPDATE_DENIED");
+    } else if (mode === LEGACY_SESSION_MODE && !user.authUserId) {
+      password = await requestLegacyAccountPassword();
+      if (!password || session !== actorId || sessionMode !== mode) throw new Error("Confirmação cancelada.");
+      parameters = { p_username: user.username, p_password: password, p_profile: profile };
+      const result = await supabaseRpc("meu_bolso_legacy_update_own_profile", parameters);
+      if (result?.ok !== true) throw new Error("PROFILE_UPDATE_DENIED");
+    } else {
+      throw new Error("Sessão não autorizada.");
+    }
+    if (session !== actorId || sessionMode !== mode) throw new Error("Sessão alterada.");
+  } finally {
+    password = "";
+    if (parameters && "p_password" in parameters) parameters.p_password = "";
+  }
+}
+
+function isValidLegacySessionToken(value) {
+  return typeof value === "string" && /^mb_ls1\.[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+function requestLegacyAccountPassword() {
+  if (document.querySelector("#legacy-account-proof-dialog")) return Promise.resolve("");
+  const dialog = document.createElement("dialog");
+  dialog.id = "legacy-account-proof-dialog";
+  dialog.className = "sheet card-sheet security-edit-dialog";
+  dialog.innerHTML = `<form autocomplete="off">
+    <div class="sheet-handle"></div>
+    <header class="sheet-header"><div class="card-header-copy"><span class="eyebrow">DADOS DA CONTA</span><h2>Confirmar identidade</h2><p>Informe sua senha atual para salvar seus dados.</p></div>
+    <button class="icon-button" type="button" data-cancel-proof aria-label="Fechar">×</button></header>
+    <label class="field"><span>Sua senha atual</span><input type="password" autocomplete="current-password" required maxlength="256"></label>
+    <button class="primary-button card-save-button" type="submit">Salvar alterações</button>
+  </form>`;
+  document.body.append(dialog);
+  return new Promise(resolve => {
+    const input = dialog.querySelector("input");
+    let finished = false;
+    const finish = accepted => {
+      if (finished) return;
+      finished = true;
+      const value = accepted ? input.value : "";
+      input.value = "";
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    dialog.querySelector("form").addEventListener("submit", event => { event.preventDefault(); finish(true); });
+    dialog.querySelector("[data-cancel-proof]").addEventListener("click", () => finish(false));
+    dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+    dialog.addEventListener("close", () => finish(false));
+    dialog.showModal();
+    input.focus();
   });
 }
 
-async function updateUserFields(userId, fields) {
-  if (!navigator.onLine) throw onlineCredentialOperationError();
-  const compatibleFields = USER_PROFILE_ADDRESS_FIELDS_ENABLED
-    ? fields
-    : Object.fromEntries(Object.entries(fields).filter(([field]) => !USER_PROFILE_ADDRESS_FIELDS.includes(field)));
-  await supabaseRequest("usuarios", {
-    method: "PATCH",
-    query: supabaseEq("id", userId),
-    body: compatibleFields,
-    prefer: "return=minimal",
-    queueOffline: false
+async function changeLegacyPasswordServerSide(username, currentPassword, newPassword) {
+  return supabaseRpc("meu_bolso_change_legacy_password", {
+    p_username: username,
+    p_current_password: currentPassword,
+    p_new_password: newPassword
   });
 }
 
-async function deleteUserById(userId) {
-  if (!navigator.onLine) throw onlineCredentialOperationError();
-  await supabaseRequest("usuarios", {
-    method: "DELETE",
-    query: supabaseEq("id", userId),
-    prefer: "return=minimal",
-    queueOffline: false
+async function loadAdminUsersFromSupabase(masterTransitionContext = null) {
+  const context = masterTransitionContext ? {
+    authMode: masterTransitionContext.authMode,
+    authUserId: masterTransitionContext.authUserId,
+    legacyToken: masterTransitionContext.legacyToken,
+    contextScope: masterTransitionContext.targetViewMode
+  } : {
+    authMode: sessionMode,
+    authUserId: sessionAuthUserId,
+    legacyToken: sessionLegacyToken,
+    contextScope: viewMode
+  };
+  const isContextCurrent = () => masterTransitionContext
+    ? isViewModeTransitionCurrent(masterTransitionContext)
+    : context.authMode === sessionMode
+      && context.authUserId === sessionAuthUserId
+      && context.legacyToken === sessionLegacyToken
+      && context.contextScope === viewMode;
+  if (context.contextScope !== MASTER_VIEW_MODE || !isContextCurrent()) {
+    throw new Error("MASTER_LIST_SESSION_REQUIRED");
+  }
+  let rows;
+  if (context.authMode === AUTH_SESSION_MODE && AUTH_DUAL_LOGIN_ENABLED && context.authUserId) {
+    rows = await supabaseRpc("meu_bolso_admin_list_users");
+  } else if (context.authMode === LEGACY_SESSION_MODE
+      && LEGACY_VERIFIABLE_SESSION_ENABLED
+      && isValidLegacySessionToken(context.legacyToken)) {
+    rows = await supabaseRpc("meu_bolso_legacy_master_list_users", {
+      p_session_token: context.legacyToken
+    });
+  } else {
+    throw new Error("MASTER_LIST_SESSION_REQUIRED");
+  }
+  if (!isContextCurrent()) {
+    throw new Error("MASTER_LIST_CONTEXT_CHANGED");
+  }
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function createUserAsAuthMaster(publicUser, legacyPassword) {
+  return supabaseRpc("meu_bolso_admin_create_user", {
+    p_id: publicUser.id,
+    p_nome: publicUser.name,
+    p_usuario: publicUser.username,
+    p_senha: legacyPassword,
+    p_whatsapp: publicUser.whatsapp || "",
+    p_email: publicUser.email || "",
+    p_data_cadastro: publicUser.createdAt || dateOffset(),
+    p_data_vencimento: publicUser.accessExpiresAt || futureDate(30),
+    p_valor_renovacao: Number(publicUser.renewalPrice || 49.9)
   });
 }
 
-async function authenticateAuthUser(resolvedUser, password) {
+async function updateUserAsAuthMaster(user) {
+  return supabaseRpc("meu_bolso_admin_update_user", {
+    p_user_id: user.id,
+    p_nome: user.name,
+    p_usuario: user.username,
+    p_whatsapp: user.whatsapp || "",
+    p_email: user.email || "",
+    p_data_vencimento: user.accessExpiresAt,
+    p_valor_renovacao: Number(user.renewalPrice || 0)
+  });
+}
+
+async function updateUserAsLegacyMaster(user) {
+  requireGate9ServerSideOperations();
+  const result = await withLegacyMasterProof(proof => supabaseRpc("meu_bolso_legacy_master_update_user", {
+    ...proof,
+    p_user_id: user.id,
+    p_nome: user.name,
+    p_usuario: user.username,
+    p_whatsapp: user.whatsapp || "",
+    p_email: user.email || "",
+    p_data_vencimento: user.accessExpiresAt,
+    p_valor_renovacao: Number(user.renewalPrice || 0)
+  }));
+  if (result?.ok !== true) throw new Error("Não foi possível autorizar a edição.");
+}
+
+async function setUserBlockedAsAuthMaster(userId, blocked) {
+  return supabaseRpc("meu_bolso_admin_set_user_blocked", {
+    p_user_id: userId,
+    p_blocked: Boolean(blocked)
+  });
+}
+
+async function setUserBlockedAsLegacyMaster(userId, blocked) {
+  requireGate9ServerSideOperations();
+  const result = await withLegacyMasterProof(proof => supabaseRpc("meu_bolso_legacy_master_set_user_blocked", {
+    ...proof,
+    p_user_id: userId,
+    p_blocked: Boolean(blocked)
+  }));
+  if (result?.ok !== true) throw new Error("Operação administrativa não autorizada.");
+}
+
+async function renewUserAsAuthMaster(renewal) {
+  return supabaseRpc("meu_bolso_admin_renew_user", {
+    p_user_id: renewal.userId,
+    p_renewal_id: renewal.id,
+    p_renewal_date: renewal.date,
+    p_new_expiry: renewal.accessExpiresAt,
+    p_amount: Number(renewal.amount || 0)
+  });
+}
+
+async function renewUserAsLegacyMaster(renewal, context = null) {
+  requireGate9ServerSideOperations();
+  const result = await withLegacyMasterProof(proof => {
+    if (context) assertRenewalOperationContextCurrent(context);
+    return supabaseRpc("meu_bolso_legacy_master_renew_user", {
+      ...proof,
+      p_user_id: renewal.userId,
+      p_renewal_id: renewal.id,
+      p_renewal_date: renewal.date,
+      p_new_expiry: renewal.accessExpiresAt,
+      p_amount: Number(renewal.amount || 0)
+    });
+  });
+  if (result?.ok !== true) throw new Error("Não foi possível autorizar a renovação.");
+}
+
+async function reconcileRenewalAsAuthMaster(renewal) {
+  return supabaseRpc("meu_bolso_admin_reconcile_renewal", {
+    p_user_id: renewal.userId,
+    p_renewal_id: renewal.id,
+    p_renewal_date: renewal.date,
+    p_new_expiry: renewal.accessExpiresAt,
+    p_amount: Number(renewal.amount || 0)
+  });
+}
+
+async function reconcileRenewalAsLegacyMaster(renewal, sessionToken) {
+  requireGate9ServerSideOperations();
+  if (!isValidLegacySessionToken(sessionToken)) throw new Error("Sessão Legacy Master verificável obrigatória.");
+  return supabaseRpc("meu_bolso_legacy_master_reconcile_renewal", {
+    p_session_token: sessionToken,
+    p_user_id: renewal.userId,
+    p_renewal_id: renewal.id,
+    p_renewal_date: renewal.date,
+    p_new_expiry: renewal.accessExpiresAt,
+    p_amount: Number(renewal.amount || 0)
+  });
+}
+
+async function setLegacyPasswordAsAuthMaster(userId, newPassword) {
+  return supabaseRpc("meu_bolso_admin_set_legacy_password", {
+    p_user_id: userId,
+    p_new_password: newPassword
+  });
+}
+
+async function deleteUserAsAuthMaster(userId) {
+  return supabaseRpc("meu_bolso_admin_delete_user", { p_user_id: userId });
+}
+
+async function deleteUserAsLegacyMaster(userId) {
+  requireGate9ServerSideOperations();
+  const result = await withLegacyMasterProof(proof => supabaseRpc("meu_bolso_legacy_master_delete_user", {
+    ...proof, p_user_id: userId
+  }));
+  if (result?.ok !== true) throw new Error("Não foi possível autorizar a exclusão.");
+}
+
+async function authenticateAuthUser(loginEmail, password) {
   if (!AUTH_DUAL_LOGIN_ENABLED || !supabaseAuthClient) throw new Error("AUTH_FLOW_DISABLED");
-  if (!resolvedUser?.authUserId || !resolvedUser.email) throw new Error("AUTH_PROFILE_INVALID");
-  const { data, error } = await supabaseAuthClient.auth.signInWithPassword({ email: resolvedUser.email, password });
-  if (error || !data?.session || data.user?.id !== resolvedUser.authUserId) {
+  if (!isValidEmail(loginEmail)) throw new Error("AUTH_PROFILE_INVALID");
+  const { data, error } = await supabaseAuthClient.auth.signInWithPassword({ email: loginEmail, password });
+  if (error || !data?.session || !data.user?.id) {
     if (data?.session) await supabaseAuthClient.auth.signOut();
     throw new Error("AUTH_LOGIN_FAILED");
   }
   sessionMode = AUTH_SESSION_MODE;
   sessionAuthUserId = data.user.id;
-  const confirmedUser = await loadUserByAuthId(data.user.id);
-  if (!confirmedUser || confirmedUser.id !== resolvedUser.id || confirmedUser.authUserId !== data.user.id) {
+  sessionLegacyToken = null;
+  const confirmedUser = await loadCurrentAuthUser();
+  if (!confirmedUser || confirmedUser.authUserId !== data.user.id) {
     await supabaseAuthClient.auth.signOut();
     clearSession();
     throw new Error("AUTH_PROFILE_MISMATCH");
   }
   return confirmedUser;
+}
+
+async function migrateLegacyUserToAuth(username, password) {
+  if (!LEGACY_AUTH_MIGRATION_READY || !supabaseAuthClient) throw new Error("LEGACY_AUTH_MIGRATION_DISABLED");
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  const response = await fetch(`${SUPABASE_CONFIG.url}/functions/v1/${LEGACY_AUTH_MIGRATION_FUNCTION}`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_CONFIG.anonKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ username, password })
+  });
+  if (response.status === 401) return null;
+  if (response.status === 429) {
+    const error = new Error("LEGACY_AUTH_RATE_LIMITED");
+    error.code = "LEGACY_AUTH_RATE_LIMITED";
+    throw error;
+  }
+  if (!response.ok) throw new Error("LEGACY_AUTH_MIGRATION_FAILED");
+  const result = await response.json();
+  if (result?.ok !== true || result.mode !== "auth" || !isValidEmail(result.login_email)) {
+    throw new Error("LEGACY_AUTH_MIGRATION_FAILED");
+  }
+  return authenticateAuthUser(result.login_email, password);
+}
+
+async function authenticateLegacyOrMigrate(username, password) {
+  sessionLegacyToken = null;
+  if (LEGACY_AUTH_MIGRATION_READY) {
+    try {
+      const migratedUser = await migrateLegacyUserToAuth(username, password);
+      if (migratedUser) return migratedUser;
+    } catch (error) {
+      if (error?.code === "LEGACY_AUTH_RATE_LIMITED") throw error;
+      console.warn("[MEU BOLSO][Auth] migração Legacy não concluída; mantendo fallback", error?.message || "LEGACY_AUTH_MIGRATION_FAILED");
+    }
+  }
+  sessionMode = LEGACY_SESSION_MODE;
+  sessionAuthUserId = null;
+  sessionLegacyToken = null;
+  return loadLegacyUserByCredentials(username, password);
 }
 
 function selectWithFilter(filter = "") {
@@ -834,6 +1362,20 @@ async function supabaseSelect(table, query = "select=*") {
   return supabaseRequest(table, { method: "GET", query });
 }
 
+async function supabaseRpc(functionName, parameters = {}) {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  return supabaseRequest(`rpc/${functionName}`, {
+    method: "POST",
+    body: parameters,
+    prefer: "return=representation",
+    queueOffline: false
+  });
+}
+
+function usesAuthMasterRpcs() {
+  return sessionMode === AUTH_SESSION_MODE && viewMode === MASTER_VIEW_MODE;
+}
+
 async function supabaseRequestHeaders(prefer = "return=representation") {
   let authorization = SUPABASE_CONFIG.anonKey;
   if (sessionMode === AUTH_SESSION_MODE) {
@@ -872,6 +1414,104 @@ function isRemoteWriteOutcomeUncertain(error) {
     || error?.code === "CREDENTIAL_OPERATION_REQUIRES_ONLINE"
     || isNetworkError(error)
     || !error?.status;
+}
+
+function masterUserCreationError(code) {
+  const allowedCodes = new Set([
+    "USERNAME_EXISTS",
+    "EMAIL_EXISTS",
+    "WHATSAPP_EXISTS",
+    "ID_CONFLICT",
+    "INVALID_REQUEST"
+  ]);
+  const safeCode = allowedCodes.has(code) ? code : "INVALID_REQUEST";
+  const error = new Error("Não foi possível concluir o cadastro.");
+  error.name = "MasterUserCreationError";
+  error.code = safeCode;
+  error.status = safeCode.endsWith("_EXISTS") || safeCode === "ID_CONFLICT" ? 409 : 400;
+  return error;
+}
+
+function validateMasterUserCreationResult(result, expectedUserId) {
+  if (result?.ok === true
+      && result.user_id === expectedUserId
+      && (result.code === "CREATED" || result.code === "RECONCILED")) {
+    return result;
+  }
+  throw masterUserCreationError(result?.code);
+}
+
+async function executeIdempotentMasterUserCreation(operation, expectedUserId) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return validateMasterUserCreationResult(await operation(), expectedUserId);
+    } catch (error) {
+      if (attempt === 0 && isRemoteWriteOutcomeUncertain(error)) continue;
+      throw error;
+    }
+  }
+  throw new Error("Não foi possível confirmar o cadastro.");
+}
+
+function publicRegistrationError(code) {
+  const safeCode = code === "TRY_LATER" ? "TRY_LATER" : "REGISTRATION_FAILED";
+  const error = new Error("Não foi possível concluir o cadastro.");
+  error.name = "PublicRegistrationError";
+  error.code = safeCode;
+  error.status = safeCode === "TRY_LATER" ? 429 : 400;
+  return error;
+}
+
+function validatePublicRegistrationResult(result, expectedUserId) {
+  if (result?.ok === true
+      && result.user_id === expectedUserId
+      && typeof result.created_at === "string"
+      && typeof result.expires_at === "string"
+      && Number.isFinite(Number(result.renewal_price))) {
+    if (LEGACY_VERIFIABLE_SESSION_ENABLED) {
+      const session = legacyRegistrationSessionFromResult(result, expectedUserId);
+      if (!session) throw publicRegistrationError("REGISTRATION_FAILED");
+    }
+    return result;
+  }
+  throw publicRegistrationError(result?.code);
+}
+
+function legacyRegistrationSessionFromResult(result, expectedUserId) {
+  if (!LEGACY_VERIFIABLE_SESSION_ENABLED) return null;
+  const token = result?.session_token;
+  const expiresAt = Date.parse(result?.session_expires_at || "");
+  const user = legacyUserFromSessionProfile(result?.profile);
+  if (!isValidLegacySessionToken(token)
+      || !Number.isFinite(expiresAt)
+      || expiresAt <= Date.now()
+      || !user
+      || user.id !== result?.user_id
+      || user.id !== expectedUserId
+      || user.authUserId
+      || user.role !== "user") {
+    return null;
+  }
+  return { token, expiresAt: result.session_expires_at, user };
+}
+
+async function executeIdempotentPublicRegistration(operation, expectedUserId) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return validatePublicRegistrationResult(await operation(), expectedUserId);
+    } catch (error) {
+      if (attempt === 0 && isRemoteWriteOutcomeUncertain(error)) continue;
+      throw error;
+    }
+  }
+  throw publicRegistrationError("REGISTRATION_FAILED");
+}
+
+function masterUserCreationConflictMessage(error) {
+  if (error?.code === "USERNAME_EXISTS") return "Este nome de usuário já existe.";
+  if (error?.code === "EMAIL_EXISTS") return "Este e-mail já está cadastrado.";
+  if (error?.code === "WHATSAPP_EXISTS") return "Este WhatsApp já está cadastrado.";
+  return "";
 }
 
 async function supabaseRestFetch(resource, { method = "GET", query = "", headers, body = null } = {}) {
@@ -979,7 +1619,7 @@ async function syncOfflineQueue() {
     logActivity("Sincronizou alterações offline.");
     if (session) {
       if (viewMode === MASTER_VIEW_MODE) await refreshMasterData();
-      else await refreshUserFinancialData();
+      else await refreshUserFinancialData({ primaryOperationPersisted: true });
       render();
     }
     showToast("Dados sincronizados com sucesso.");
@@ -1262,31 +1902,101 @@ function toSupabaseRows(data) {
 }
 
 async function saveNewUserToSupabase(publicUser, legacyPassword) {
-  if (!navigator.onLine) throw onlineCredentialOperationError();
-  const userRow = {
-    id: publicUser.id,
-    nome: publicUser.name,
-    usuario: publicUser.username,
-    senha: legacyPassword,
-    whatsapp: publicUser.whatsapp || "",
-    email: publicUser.email || "",
-    data_cadastro: publicUser.createdAt || dateOffset(),
-    data_vencimento: publicUser.accessExpiresAt || futureDate(30),
-    status: "ativo",
-    perfil: "usuario",
-    auth_user_id: null,
-    valor_renovacao: Number(publicUser.renewalPrice || 49.9)
+  requireGate9ServerSideOperations();
+  const payload = {
+    p_id: publicUser.id,
+    p_nome: publicUser.name,
+    p_usuario: publicUser.username,
+    p_senha: legacyPassword,
+    p_whatsapp: publicUser.whatsapp || "",
+    p_email: publicUser.email || ""
   };
-  if (USER_PROFILE_ADDRESS_FIELDS_ENABLED) {
-    userRow.endereco = publicUser.address || "";
-    userRow.cidade = publicUser.city || "";
-    userRow.estado = publicUser.state || "";
+  let result;
+  if (usesAuthMasterRpcs()) {
+    result = await executeIdempotentMasterUserCreation(
+      () => createUserAsAuthMaster(publicUser, legacyPassword),
+      publicUser.id
+    );
+  } else if (session) {
+    // Mesmo que o contexto visual seja adulterado, o servidor exige prova Master.
+    result = await withLegacyMasterProof(proof => executeIdempotentMasterUserCreation(
+      () => supabaseRpc("meu_bolso_legacy_master_create_user", {
+        ...proof, ...payload,
+        p_data_vencimento: publicUser.accessExpiresAt,
+        p_valor_renovacao: Number(publicUser.renewalPrice ?? 49.9)
+      }),
+      publicUser.id
+    ));
+  } else {
+    result = await executeIdempotentPublicRegistration(
+      () => supabaseRpc("meu_bolso_legacy_register", payload),
+      publicUser.id
+    );
   }
-  await supabaseRequest("usuarios", {
-    method: "POST",
-    body: [userRow],
-    prefer: "resolution=merge-duplicates,return=minimal",
-    queueOffline: false
+  publicUser.createdAt = result.created_at;
+  publicUser.accessExpiresAt = result.expires_at;
+  publicUser.renewalPrice = Number(result.renewal_price);
+  return result;
+}
+
+function requireGate9ServerSideOperations() {
+  if (!navigator.onLine) throw onlineCredentialOperationError();
+  if (!SUPABASE_ENVIRONMENT_CONFIG_VALID) {
+    throw new Error("Configuração de ambiente inválida para esta operação.");
+  }
+}
+
+async function withLegacyMasterProof(operation) {
+  const actor = currentUser();
+  if (sessionMode !== LEGACY_SESSION_MODE || !actor || actor.authUserId || actor.role !== "master") {
+    throw new Error("Acesso administrativo não autorizado.");
+  }
+  const actorId = actor.id;
+  let password = await requestLegacyMasterPassword();
+  const proof = { p_master_username: actor.username, p_master_password: password };
+  try {
+    if (!password || session !== actorId || sessionMode !== LEGACY_SESSION_MODE) {
+      throw new Error("Confirmação administrativa cancelada.");
+    }
+    return await operation(proof);
+  } finally {
+    password = "";
+    proof.p_master_password = "";
+  }
+}
+
+function requestLegacyMasterPassword() {
+  // Credencial efemera, sem guardar em db, sessao, rascunho ou fila offline.
+  if (document.querySelector("#legacy-master-proof-dialog")) return Promise.resolve("");
+  const dialog = document.createElement("dialog");
+  dialog.id = "legacy-master-proof-dialog";
+  dialog.className = "sheet card-sheet security-edit-dialog";
+  dialog.innerHTML = `<form autocomplete="off">
+    <div class="sheet-handle"></div>
+    <header class="sheet-header"><div class="card-header-copy"><span class="eyebrow">CONFIRMAÇÃO ADMINISTRATIVA</span><h2>Confirmar identidade</h2><p>Informe sua senha atual de Master para esta operação.</p></div>
+    <button class="icon-button" type="button" data-cancel-proof aria-label="Fechar">×</button></header>
+    <label class="field"><span>Sua senha atual</span><input type="password" name="masterPassword" autocomplete="current-password" required maxlength="256"></label>
+    <button class="primary-button card-save-button" type="submit">Confirmar operação</button>
+  </form>`;
+  document.body.append(dialog);
+  return new Promise(resolve => {
+    const input = dialog.querySelector("input");
+    let finished = false;
+    const finish = accepted => {
+      if (finished) return;
+      finished = true;
+      const value = accepted ? input.value : "";
+      input.value = "";
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    dialog.querySelector("form").addEventListener("submit", event => { event.preventDefault(); finish(true); });
+    dialog.querySelector("[data-cancel-proof]").addEventListener("click", () => finish(false));
+    dialog.addEventListener("cancel", event => { event.preventDefault(); finish(false); });
+    dialog.addEventListener("close", () => finish(false));
+    dialog.showModal();
+    input.focus();
   });
 }
 
@@ -1488,9 +2198,18 @@ function monthlyExpenseDateForMonth(dueDate, targetMonth) {
   return `${targetMonth}-${String(dueDay).padStart(2, "0")}`;
 }
 
-async function ensureMonthlyOccurrences(userId = session, targetDate = dateOffset()) {
-  const incomes = await ensureMonthlyIncomeOccurrences(userId, targetDate);
-  const expenses = await ensureMonthlyExpenseOccurrences(userId, targetDate);
+function assertMonthlyOccurrenceContext(options = {}) {
+  if (typeof options.isContextCurrent === "function" && !options.isContextCurrent()) {
+    throw new Error("Contexto da sessão alterado durante a geração de recorrências.");
+  }
+}
+
+async function ensureMonthlyOccurrences(userId = session, targetDate = dateOffset(), options = {}) {
+  assertMonthlyOccurrenceContext(options);
+  const incomes = await ensureMonthlyIncomeOccurrences(userId, targetDate, options);
+  assertMonthlyOccurrenceContext(options);
+  const expenses = await ensureMonthlyExpenseOccurrences(userId, targetDate, options);
+  assertMonthlyOccurrenceContext(options);
   return { incomes, expenses };
 }
 
@@ -1544,11 +2263,13 @@ function monthlyIncomeDueDate(items, targetMonth) {
   return `${targetMonth}-${String(dueDay).padStart(2, "0")}`;
 }
 
-async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dateOffset()) {
+async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dateOffset(), options = {}) {
   if (!userId) return [];
-  db.transactions[userId] ||= [];
+  assertMonthlyOccurrenceContext(options);
+  const targetDatabase = options.database || db;
+  targetDatabase.transactions[userId] ||= [];
   const targetMonth = targetDate.slice(0, 7);
-  const monthlyIncomes = db.transactions[userId].filter(item =>
+  const monthlyIncomes = targetDatabase.transactions[userId].filter(item =>
     item.type === "income" &&
     (item.repeat === "fixed" || item.recurrenceId) &&
     item.dueDate &&
@@ -1565,7 +2286,7 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
     const source = [...items].sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
     if (!source || source.repeat !== "fixed" || source.recurrenceEnded || source.dueDate.slice(0, 7) >= targetMonth) return;
     const id = monthlyIncomeOccurrenceId(token, targetMonth);
-    if (db.transactions[userId].some(item => item.id === id)) return;
+    if (targetDatabase.transactions[userId].some(item => item.id === id)) return;
     created.push({
       id,
       name: source.name,
@@ -1586,25 +2307,30 @@ async function ensureMonthlyIncomeOccurrences(userId = session, targetDate = dat
     });
   });
   if (!created.length) return [];
-  db.transactions[userId].unshift(...created);
-  cacheDatabase();
+  assertMonthlyOccurrenceContext(options);
+  targetDatabase.transactions[userId].unshift(...created);
+  if (options.persistCache !== false) cacheDatabase();
   try {
+    assertMonthlyOccurrenceContext(options);
     await upsertRows("receitas", created.map(item => transactionToSupabaseRow(item, userId)));
+    assertMonthlyOccurrenceContext(options);
   } catch (error) {
     const createdIds = new Set(created.map(item => item.id));
-    db.transactions[userId] = db.transactions[userId].filter(item => !createdIds.has(item.id));
-    cacheDatabase();
+    targetDatabase.transactions[userId] = targetDatabase.transactions[userId].filter(item => !createdIds.has(item.id));
+    if (options.persistCache !== false && (typeof options.isContextCurrent !== "function" || options.isContextCurrent())) cacheDatabase();
     throw error;
   }
-  created.forEach(item => logActivity(`Gerou receita mensal ${item.name} para ${targetMonth}.`, userId));
+  if (options.recordActivity !== false) created.forEach(item => logActivity(`Gerou receita mensal ${item.name} para ${targetMonth}.`, userId));
   return created;
 }
 
-async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = dateOffset()) {
+async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = dateOffset(), options = {}) {
   if (!userId) return [];
-  db.transactions[userId] ||= [];
+  assertMonthlyOccurrenceContext(options);
+  const targetDatabase = options.database || db;
+  targetDatabase.transactions[userId] ||= [];
   const targetMonth = targetDate.slice(0, 7);
-  const monthlyExpenses = db.transactions[userId].filter(item =>
+  const monthlyExpenses = targetDatabase.transactions[userId].filter(item =>
     item.type === "expense" &&
     (item.repeat === "fixed" || item.recurrenceId) &&
     item.source !== "card-installment" &&
@@ -1623,7 +2349,7 @@ async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = da
     const source = [...items].sort((a, b) => b.dueDate.localeCompare(a.dueDate))[0];
     if (!source || source.repeat !== "fixed" || source.dueDate.slice(0, 7) >= targetMonth) return;
     const id = monthlyExpenseOccurrenceId(token, targetMonth);
-    if (db.transactions[userId].some(item => item.id === id)) return;
+    if (targetDatabase.transactions[userId].some(item => item.id === id)) return;
     created.push({
       ...source,
       id,
@@ -1637,17 +2363,20 @@ async function ensureMonthlyExpenseOccurrences(userId = session, targetDate = da
     });
   });
   if (!created.length) return [];
-  db.transactions[userId].unshift(...created);
-  cacheDatabase();
+  assertMonthlyOccurrenceContext(options);
+  targetDatabase.transactions[userId].unshift(...created);
+  if (options.persistCache !== false) cacheDatabase();
   try {
+    assertMonthlyOccurrenceContext(options);
     await upsertRows("despesas", created.map(item => transactionToSupabaseRow(item, userId)));
+    assertMonthlyOccurrenceContext(options);
   } catch (error) {
     const createdIds = new Set(created.map(item => item.id));
-    db.transactions[userId] = db.transactions[userId].filter(item => !createdIds.has(item.id));
-    cacheDatabase();
+    targetDatabase.transactions[userId] = targetDatabase.transactions[userId].filter(item => !createdIds.has(item.id));
+    if (options.persistCache !== false && (typeof options.isContextCurrent !== "function" || options.isContextCurrent())) cacheDatabase();
     throw error;
   }
-  created.forEach(item => logActivity(`Gerou despesa mensal ${item.name} para ${targetMonth}.`, userId));
+  if (options.recordActivity !== false) created.forEach(item => logActivity(`Gerou despesa mensal ${item.name} para ${targetMonth}.`, userId));
   return created;
 }
 
@@ -1947,41 +2676,207 @@ function resetViewTransientState() {
   homeOverviewTab = "summary";
 }
 
-async function switchViewMode(targetViewMode) {
-  if (![MASTER_VIEW_MODE, USER_VIEW_MODE].includes(targetViewMode) || targetViewMode === viewMode) return;
-  if (!hasMasterRole()) return showToast("Acesso não autorizado.");
-  if (hasPendingQueueForCurrentContext() && navigator.onLine) await syncOfflineQueue();
-  if (hasPendingQueueForCurrentContext()) return showToast("Sincronize as alterações pendentes antes de trocar de contexto.");
-  if (!navigator.onLine) return showToast("Conecte-se à internet para trocar de contexto.");
+function viewModeTransitionContext(transition) {
+  return {
+    transitionId: transition.id,
+    financialUserId: transition.financialUserId,
+    authMode: transition.authMode,
+    authUserId: transition.authUserId,
+    legacyToken: transition.legacyToken,
+    contextScope: MASTER_VIEW_MODE,
+    sourceViewMode: transition.sourceViewMode,
+    targetViewMode: transition.targetViewMode,
+    generation: transition.generation
+  };
+}
 
-  const previousViewMode = viewMode;
-  const previousDatabase = db;
-  invalidateDatabaseLoads();
+function isViewModeTransitionCurrent(context) {
+  return Boolean(
+    context?.transitionId
+    && activeViewModeTransition?.id === context.transitionId
+    && context.financialUserId === session
+    && context.authMode === sessionMode
+    && context.authUserId === sessionAuthUserId
+    && context.legacyToken === sessionLegacyToken
+    && context.sourceViewMode === viewMode
+    && context.generation === databaseLoadGeneration
+  );
+}
+
+function assertViewModeTransitionCurrent(context) {
+  if (!isViewModeTransitionCurrent(context)) {
+    const error = new Error("Transição de contexto substituída.");
+    error.code = "VIEW_MODE_TRANSITION_STALE";
+    throw error;
+  }
+}
+
+function isSameVerifiedMaster(first, second) {
+  return Boolean(
+    first?.id
+    && second?.id === first.id
+    && (first.authUserId || null) === (second.authUserId || null)
+    && second.role === "master"
+    && !second.blocked
+  );
+}
+
+async function buildViewModeTransitionDatabase(verifiedMaster, context) {
+  assertViewModeTransitionCurrent(context);
+  if (context.targetViewMode === MASTER_VIEW_MODE) {
+    const nextDb = await buildMasterDatabase(context);
+    assertViewModeTransitionCurrent(context);
+    const confirmedMaster = await resolveCurrentMasterForRefresh(context, isViewModeTransitionCurrent);
+    if (!isSameVerifiedMaster(verifiedMaster, confirmedMaster)) throw new Error("Autoridade Master alterada.");
+    return { database: nextDb, user: confirmedMaster, occurrences: { incomes: [], expenses: [] } };
+  }
+
+  const personalUser = context.authMode === LEGACY_SESSION_MODE
+    ? await loadCurrentLegacyUser(context.legacyToken)
+    : verifiedMaster;
+  assertViewModeTransitionCurrent(context);
+  if (!isSameVerifiedMaster(verifiedMaster, personalUser) || !personalUser?.name || !personalUser?.username) {
+    throw new Error("Perfil Master incompleto ou alterado.");
+  }
+
+  const nextDb = await buildPersonalDatabase(personalUser);
+  assertViewModeTransitionCurrent(context);
+  const confirmedMaster = await resolveCurrentMasterForRefresh(context, isViewModeTransitionCurrent);
+  if (!isSameVerifiedMaster(personalUser, confirmedMaster)) throw new Error("Identidade Master alterada.");
+
+  const occurrences = await ensureMonthlyOccurrences(confirmedMaster.id, dateOffset(), {
+    database: nextDb,
+    isContextCurrent: () => isViewModeTransitionCurrent(context),
+    persistCache: false,
+    recordActivity: false
+  });
+  assertViewModeTransitionCurrent(context);
+
+  const finalMaster = await resolveCurrentMasterForRefresh(context, isViewModeTransitionCurrent);
+  if (!isSameVerifiedMaster(confirmedMaster, finalMaster)) throw new Error("Identidade Master alterada.");
+  nextDb.users = [sanitizeCredentialFields(personalUser)];
+  return { database: nextDb, user: personalUser, occurrences };
+}
+
+function restoreViewModeTransitionStorage(transition) {
+  if (transition.savedSession === null) localStorage.removeItem(SESSION_KEY);
+  else localStorage.setItem(SESSION_KEY, transition.savedSession);
+  if (transition.savedDatabaseCache === null) localStorage.removeItem(LOCAL_DB_KEY);
+  else localStorage.setItem(LOCAL_DB_KEY, transition.savedDatabaseCache);
+}
+
+function commitViewModeTransition(result, transition, context) {
+  assertViewModeTransitionCurrent(context);
+  try {
+    db = result.database;
+    viewMode = transition.targetViewMode;
+    isOfflineMode = false;
+    saveSession(result.user, {
+      mode: transition.authMode,
+      authUserId: transition.authUserId,
+      legacyToken: transition.legacyToken,
+      requestedViewMode: transition.targetViewMode
+    });
+    cacheDatabase();
+    resetViewTransientState();
+  } catch (error) {
+    db = transition.previousDatabase;
+    session = transition.financialUserId;
+    sessionMode = transition.authMode;
+    sessionAuthUserId = transition.authUserId;
+    sessionLegacyToken = transition.legacyToken;
+    viewMode = transition.sourceViewMode;
+    isOfflineMode = transition.previousOfflineMode;
+    restoreViewModeTransitionStorage(transition);
+    throw error;
+  }
+
+  try {
+    result.occurrences.incomes.forEach(item => logActivity(`Gerou receita mensal ${item.name} para ${item.dueDate.slice(0, 7)}.`, result.user.id));
+    result.occurrences.expenses.forEach(item => logActivity(`Gerou despesa mensal ${item.name} para ${item.dueDate.slice(0, 7)}.`, result.user.id));
+    logSupabaseLoad(result.user, db);
+  } catch {
+    console.warn("[MEU BOLSO][Contexto] registro auxiliar da troca não concluído.");
+  }
+}
+
+async function switchViewMode(targetViewMode) {
+  if (![MASTER_VIEW_MODE, USER_VIEW_MODE].includes(targetViewMode)) return;
+  if (activeViewModeTransition?.targetViewMode === targetViewMode) return activeViewModeTransition.promise;
+  if (targetViewMode === viewMode) {
+    if (activeViewModeTransition) {
+      viewModeTransitionSequence += 1;
+      activeViewModeTransition = null;
+      invalidateDatabaseLoads();
+      isBooting = false;
+      render();
+    }
+    return;
+  }
+
+  const transition = {
+    id: ++viewModeTransitionSequence,
+    sourceViewMode: viewMode,
+    targetViewMode,
+    financialUserId: session,
+    authMode: sessionMode,
+    authUserId: sessionAuthUserId,
+    legacyToken: sessionLegacyToken,
+    generation: null,
+    previousDatabase: db,
+    previousOfflineMode: isOfflineMode,
+    savedSession: localStorage.getItem(SESSION_KEY),
+    savedDatabaseCache: localStorage.getItem(LOCAL_DB_KEY),
+    promise: null
+  };
+  activeViewModeTransition = transition;
   isBooting = true;
   render();
+
+  transition.promise = (async () => {
+    if (hasPendingQueueForCurrentContext() && navigator.onLine) await syncOfflineQueue();
+    if (activeViewModeTransition?.id !== transition.id) return;
+    if (hasPendingQueueForCurrentContext()) {
+      const error = new Error("Existem alterações pendentes.");
+      error.code = "VIEW_MODE_PENDING_QUEUE";
+      throw error;
+    }
+    if (!navigator.onLine) {
+      const error = new Error("Troca de contexto requer conexão.");
+      error.code = "VIEW_MODE_REQUIRES_ONLINE";
+      throw error;
+    }
+
+    invalidateDatabaseLoads();
+    transition.generation = databaseLoadGeneration;
+    const context = viewModeTransitionContext(transition);
+    assertViewModeTransitionCurrent(context);
+    const verifiedMaster = await resolveCurrentMasterForRefresh(context, isViewModeTransitionCurrent);
+    assertViewModeTransitionCurrent(context);
+    const result = await buildViewModeTransitionDatabase(verifiedMaster, context);
+    assertViewModeTransitionCurrent(context);
+    commitViewModeTransition(result, transition, context);
+  })();
+
   try {
-    const verifiedUser = await loadUserById(session);
-    if (!verifiedUser || verifiedUser.role !== "master") throw new Error("Papel Master Global não confirmado.");
-    viewMode = targetViewMode;
-    invalidateDatabaseLoads();
-    const targetGeneration = databaseLoadGeneration;
-    localStorage.removeItem(LOCAL_DB_KEY);
-    if (targetViewMode === MASTER_VIEW_MODE) await loadMasterDatabase(verifiedUser);
-    else await loadPersonalDatabase(verifiedUser);
-    if (session !== verifiedUser.id || viewMode !== targetViewMode || databaseLoadGeneration !== targetGeneration || currentUser()?.id !== verifiedUser.id) return;
-    saveSession(verifiedUser, { mode: sessionMode, authUserId: sessionAuthUserId, requestedViewMode: targetViewMode });
-    resetViewTransientState();
-    showToast("Perfil alterado com sucesso.");
+    await transition.promise;
+    if (activeViewModeTransition?.id === transition.id && viewMode === targetViewMode) {
+      showToast("Perfil alterado com sucesso.");
+    }
   } catch (error) {
-    viewMode = previousViewMode;
-    db = previousDatabase;
-    invalidateDatabaseLoads();
-    cacheDatabase();
-    showToast("Não foi possível trocar de contexto.");
-    console.error("[MEU BOLSO][Contexto] troca não concluída", error?.message || error);
+    if (activeViewModeTransition?.id !== transition.id || error?.code === "VIEW_MODE_TRANSITION_STALE") return;
+    if (error?.code === "VIEW_MODE_PENDING_QUEUE") showToast("Sincronize as alterações pendentes antes de trocar de contexto.");
+    else if (error?.code === "VIEW_MODE_REQUIRES_ONLINE") showToast("Conecte-se à internet para trocar de contexto.");
+    else {
+      showToast("Não foi possível trocar de contexto.");
+      console.error("[MEU BOLSO][Contexto] troca não concluída", error?.code || error?.name || "VIEW_MODE_FAILED");
+    }
   } finally {
-    isBooting = false;
-    render();
+    if (activeViewModeTransition?.id === transition.id) {
+      activeViewModeTransition = null;
+      isBooting = false;
+      render();
+    }
   }
 }
 
@@ -5029,32 +5924,28 @@ function bindLogin() {
     const data = new FormData(form);
     const username = data.get("username").trim().toLowerCase();
     const password = data.get("password");
-    const previousLoginState = { session, sessionMode, sessionAuthUserId, viewMode, db };
-    let resolvedUser;
+    const previousLoginState = { session, sessionMode, sessionAuthUserId, sessionLegacyToken, viewMode, db };
+    let user;
     try {
-      resolvedUser = await loadUserByUsername(username);
+      user = await authenticateLegacyOrMigrate(username, password);
     } catch (error) {
+      if (["LEGACY_ACCESS_BLOCKED", "LEGACY_ACCESS_EXPIRED"].includes(error?.code)) {
+        clearSession();
+        clearPasswordFields(form);
+        form.querySelector(".login-alert")?.remove();
+        const message = error.code === "LEGACY_ACCESS_BLOCKED"
+          ? "Seu acesso está bloqueado. Entre em contato com o administrador."
+          : "Seu acesso expirou. Entre em contato com o administrador.";
+        form.insertAdjacentHTML("afterbegin", `<div class="login-alert">${escapeHtml(message)}</div>`);
+        return;
+      }
+      if (["LEGACY_TRY_LATER", "LEGACY_AUTH_RATE_LIMITED"].includes(error?.code)) {
+        clearPasswordFields(form);
+        return showToast("Muitas tentativas. Aguarde e tente novamente.");
+      }
       return showToast("Não foi possível conectar. Verifique sua internet.");
     }
-    if (!resolvedUser) return showToast("Usuário ou senha incorretos.");
-    let user;
-    if (resolvedUser.authUserId) {
-      try {
-        user = await authenticateAuthUser(resolvedUser, password);
-      } catch (error) {
-        console.warn("[MEU BOLSO][Auth] login Auth não concluído", error?.message || "AUTH_LOGIN_FAILED");
-        return showToast("Usuário ou senha incorretos.");
-      }
-    } else {
-      sessionMode = LEGACY_SESSION_MODE;
-      sessionAuthUserId = null;
-      try {
-        user = await loadLegacyUserByCredentials(username, password);
-      } catch (error) {
-        return showToast("Não foi possível conectar. Verifique sua internet.");
-      }
-      if (!user) return showToast("Usuário ou senha incorretos.");
-    }
+    if (!user) return showToast("Usuário ou senha incorretos.");
     if (isAccessBlocked(user)) {
       if (sessionMode === AUTH_SESSION_MODE) await supabaseAuthClient?.auth.signOut();
       clearSession();
@@ -5076,6 +5967,7 @@ function bindLogin() {
         session = previousLoginState.session;
         sessionMode = previousLoginState.sessionMode;
         sessionAuthUserId = previousLoginState.sessionAuthUserId;
+        sessionLegacyToken = previousLoginState.sessionLegacyToken;
         viewMode = previousLoginState.viewMode;
         db = previousLoginState.db;
         return showToast("Não foi possível carregar seus dados. Verifique a conexão e tente novamente.");
@@ -5104,8 +5996,23 @@ function bindLogin() {
 
 async function registerUser(event) {
   event.preventDefault();
+  if (activePublicRegistrationPromise) return activePublicRegistrationPromise;
+  const form = event.currentTarget;
+  const submitButton = event.submitter || form?.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
+  const operation = registerUserOnce(form);
+  activePublicRegistrationPromise = operation;
+  try {
+    return await operation;
+  } finally {
+    if (activePublicRegistrationPromise === operation) activePublicRegistrationPromise = null;
+    if (submitButton?.isConnected) submitButton.disabled = false;
+  }
+}
+
+async function registerUserOnce(form) {
   if (!navigator.onLine) return showToast("Esta operação requer conexão com a internet.");
-  const data = new FormData(event.currentTarget);
+  const data = new FormData(form);
   const username = data.get("username").trim().toLowerCase();
   const whatsapp = normalizePhone(data.get("whatsapp"));
   const email = data.get("email").trim().toLowerCase();
@@ -5135,10 +6042,19 @@ async function registerUser(event) {
   db.cardPurchases[newId] = [];
   db.categories[newId] = defaultCategoryRecords();
   db.accounts[newId] = [...DEFAULT_ACCOUNTS];
+  let registeredUser = newUser;
+  let registrationSession = null;
   try {
-    await saveNewUserToSupabase(newUser, legacyPassword);
-    await upsertRows("categorias", db.categories[newId].map(item => categoryToSupabaseRow(item, newId)));
-    await upsertRows("tipos_conta", db.accounts[newId].map(nome => ({ id: crypto.randomUUID(), usuario_id: newId, nome })));
+    const registrationResult = await saveNewUserToSupabase(newUser, legacyPassword);
+    if (LEGACY_VERIFIABLE_SESSION_ENABLED) {
+      registrationSession = legacyRegistrationSessionFromResult(registrationResult, newId);
+      if (!registrationSession) throw publicRegistrationError("REGISTRATION_FAILED");
+      registeredUser = registrationSession.user;
+      db.users = db.users.map(user => user.id === newId ? registeredUser : user);
+    }
+    const registeredUserId = registeredUser.id;
+    await upsertRows("categorias", db.categories[newId].map(item => categoryToSupabaseRow(item, registeredUserId)));
+    await upsertRows("tipos_conta", db.accounts[newId].map(nome => ({ id: crypto.randomUUID(), usuario_id: registeredUserId, nome })));
   } catch (error) {
     db.users = db.users.filter(user => user.id !== newId);
     delete db.transactions[newId];
@@ -5149,16 +6065,20 @@ async function registerUser(event) {
     return showToast("Não foi possível salvar no Supabase.");
   } finally {
     legacyPassword = "";
-    clearPasswordFields(event.currentTarget);
+    clearPasswordFields(form);
   }
-  session = newId;
+  session = registeredUser.id;
   sessionMode = LEGACY_SESSION_MODE;
   sessionAuthUserId = null;
   viewMode = USER_VIEW_MODE;
   invalidateDatabaseLoads();
   authView = "login";
   currentView = "home";
-  saveSession(newUser, { mode: LEGACY_SESSION_MODE, authUserId: null });
+  saveSession(registeredUser, {
+    mode: LEGACY_SESSION_MODE,
+    authUserId: null,
+    legacyToken: registrationSession?.token || null
+  });
   try {
     await refreshCurrentUserData();
   } catch (error) {
@@ -5669,11 +6589,22 @@ function clearPasswordInputValues(root = document) {
 async function logout() {
   clearPasswordFields();
   const previousMode = sessionMode;
+  const previousLegacyToken = sessionLegacyToken;
+  if (previousMode === LEGACY_SESSION_MODE && LEGACY_VERIFIABLE_SESSION_ENABLED) {
+    clearSession();
+    if (navigator.onLine && isValidLegacySessionToken(previousLegacyToken)) {
+      try {
+        await revokeLegacySession(previousLegacyToken);
+      } catch {
+        console.warn("[MEU BOLSO][Sessão] revogação remota não concluída.");
+      }
+    }
+  }
   if (previousMode === AUTH_SESSION_MODE && supabaseAuthClient) {
     const { error } = await supabaseAuthClient.auth.signOut();
     if (error) return showToast("Não foi possível encerrar a sessão Auth.");
   }
-  clearSession();
+  if (session) clearSession();
   db = emptyDatabase();
   localStorage.removeItem(LOCAL_DB_KEY);
   resetViewTransientState();
@@ -5705,11 +6636,6 @@ async function autoCheckAppUpdates() {
     try {
       await syncOfflineQueue();
       await updateServiceWorker();
-      if (session) {
-        if (viewMode === MASTER_VIEW_MODE) await refreshMasterData();
-        else await refreshUserFinancialData();
-        render();
-      }
     } catch (error) {
       console.warn("[MEU BOLSO][PWA] atualização automática não concluída", error);
     }
@@ -6423,7 +7349,7 @@ document.querySelector("#transaction-form").addEventListener("submit", async eve
     else await saveTransactionToSupabase(savedItem, previousType);
     cacheDatabase();
     try {
-      await refreshUserFinancialData();
+      await refreshUserFinancialData({ primaryOperationPersisted: true });
     } catch (error) {
       if (!recurringItemsToSave.length) throw error;
       lastSyncError = error.message;
@@ -6460,7 +7386,7 @@ async function deleteTransaction(transactionId) {
       else await saveMonthlyExpenseSeriesToSupabase(closureItems);
       cacheDatabase();
       try {
-        await refreshUserFinancialData();
+        await refreshUserFinancialData({ primaryOperationPersisted: true });
       } catch (error) {
         lastSyncError = error.message;
         console.warn("[MEU BOLSO][RECORRÊNCIA] encerramento confirmado; refresh pendente", error);
@@ -6479,7 +7405,7 @@ async function deleteTransaction(transactionId) {
     await deleteRowById(item.type === "income" ? "receitas" : "despesas", item.id);
     db.transactions[session] = (db.transactions[session] || []).filter(transaction => transaction.id !== transactionId);
     cacheDatabase();
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showDeleteError(error);
   }
@@ -6501,7 +7427,7 @@ async function markTransactionPaid(transactionId) {
   item.paymentMethod = method;
   try {
     await saveTransactionToSupabase(item);
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -6887,28 +7813,20 @@ async function saveUserOnce(form) {
       if (user.authUserId && (email !== user.email?.toLowerCase() || requestedPassword)) {
         return showToast("E-mail e senha de usuário Auth exigem o fluxo seguro de autenticação.");
       }
-      user.name = data.get("name").trim();
-      user.username = username;
-      user.whatsapp = whatsapp;
-      user.email = email;
-      user.accessExpiresAt = data.get("accessExpiresAt");
-      user.renewalPrice = renewalPrice;
-      await updateUserFields(user.id, {
-        nome: user.name,
-        usuario: user.username,
-        whatsapp: user.whatsapp,
-        email: user.email,
-        data_vencimento: user.accessExpiresAt,
-        valor_renovacao: user.renewalPrice,
-        status: user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : daysUntilExpiry(user) <= 7 ? "vencendo" : "ativo"
-      });
+      const updatedUser = { ...user, name: data.get("name").trim(), username, whatsapp,
+        email, accessExpiresAt: data.get("accessExpiresAt"), renewalPrice };
+      if (usesAuthMasterRpcs()) {
+        await updateUserAsAuthMaster(updatedUser);
+      } else {
+        await updateUserAsLegacyMaster(updatedUser);
+      }
+      Object.assign(user, updatedUser);
       if (requestedPassword) {
-        await updateLegacyPassword(user.id, requestedPassword);
+        if (usesAuthMasterRpcs()) await setLegacyPasswordAsAuthMaster(user.id, requestedPassword);
+        else await updateLegacyPassword(user.id, requestedPassword);
       }
       editingUserId = null;
     } else {
-      const existingRemoteUser = await loadUserByUsername(username);
-      if (existingRemoteUser) return showToast("Este nome de usuário já existe.");
       const newId = crypto.randomUUID();
       creationLegacyPassword = data.get("password");
       const newUser = {
@@ -6935,25 +7853,16 @@ async function saveUserOnce(form) {
         await saveNewUserToSupabase(newUser, creationLegacyPassword);
         remoteUserConfirmed = true;
       } catch (creationError) {
-        const creationOutcomeUncertain = isRemoteWriteOutcomeUncertain(creationError);
-        let reconciliationCompleted = false;
-        let reconciledUser = null;
-        try {
-          reconciledUser = await loadUserByUsername(username);
-          reconciliationCompleted = true;
-        } catch {
-          creationStateAmbiguous = true;
-        }
-        if (reconciledUser?.id === newId) {
-          remoteUserConfirmed = true;
-          creationStateAmbiguous = false;
-        } else if (reconciledUser) {
+        const conflictMessage = masterUserCreationConflictMessage(creationError);
+        if (conflictMessage) {
           rollbackLocalCreation();
-          return showToast("Este nome de usuário já existe.");
-        } else if (reconciliationCompleted && !creationOutcomeUncertain) {
-          throw creationError;
-        } else {
+          return showToast(conflictMessage);
+        }
+        const creationOutcomeUncertain = isRemoteWriteOutcomeUncertain(creationError);
+        if (creationOutcomeUncertain) {
           creationStateAmbiguous = true;
+        } else {
+          throw creationError;
         }
       }
       if (remoteUserConfirmed) {
@@ -7042,17 +7951,8 @@ async function saveUserOnce(form) {
 
 async function deleteUserCascade(userId) {
   if (!navigator.onLine) throw onlineCredentialOperationError();
-  const userFilter = supabaseEq("usuario_id", userId);
-  await deleteRows("parcelas", userFilter);
-  await deleteRows("compras_cartao", userFilter);
-  await deleteRows("cartoes", userFilter);
-  await deleteRows("despesas", userFilter);
-  await deleteRows("receitas", userFilter);
-  await deleteRows("suporte", userFilter);
-  await deleteRows("renovacoes", userFilter);
-  await deleteRows("categorias", userFilter);
-  await deleteRows("tipos_conta", userFilter);
-  await deleteUserById(userId);
+  if (usesAuthMasterRpcs()) await deleteUserAsAuthMaster(userId);
+  else await deleteUserAsLegacyMaster(userId);
 }
 
 async function deleteUser(userId) {
@@ -7079,11 +7979,11 @@ async function toggleUserBlock(userId) {
   const user = db.users.find(item => item.id === userId);
   if (!user || user.role === "master") return showToast("Ação não permitida para o Master.");
   if (!await confirmAction()) return;
-  user.blocked = !user.blocked;
+  const blocked = !user.blocked;
   try {
-    await updateUserFields(user.id, {
-      status: user.blocked ? "bloqueado" : isExpired(user) ? "vencido" : daysUntilExpiry(user) <= 7 ? "vencendo" : "ativo"
-    });
+    if (usesAuthMasterRpcs()) await setUserBlockedAsAuthMaster(user.id, blocked);
+    else await setUserBlockedAsLegacyMaster(user.id, blocked);
+    user.blocked = blocked;
     await refreshMasterData();
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
@@ -7092,56 +7992,114 @@ async function toggleUserBlock(userId) {
   render();
 }
 
-async function renewUser(userId) {
-  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
-  const user = regularUsers().find(item => item.id === userId);
-  if (!user) return;
-  const newDate = await chooseRenewalDate(user);
-  if (!newDate) return;
-  if (!await confirmAction()) return;
-  const renewal = { id: crypto.randomUUID(), userId: user.id, date: dateOffset(), amount: Number(user.renewalPrice || 0), accessExpiresAt: newDate };
+function createRenewalOperationContext(targetUserId) {
+  return {
+    ...currentUserRefreshContext(),
+    operationId: ++renewalOperationSequence,
+    targetUserId
+  };
+}
+
+function isRenewalOperationContextCurrent(context) {
+  return Boolean(
+    context?.operationId
+    && context.targetUserId
+    && activeRenewalOperations.get(context.targetUserId)?.context?.operationId === context.operationId
+    && isCurrentUserRefreshContextCurrent(context)
+  );
+}
+
+function assertRenewalOperationContextCurrent(context) {
+  if (!isRenewalOperationContextCurrent(context)) throw new Error("Contexto da renovação alterado.");
+}
+
+async function resolveRenewalMasterContext(context) {
+  assertRenewalOperationContextCurrent(context);
+  const master = await resolveCurrentMasterForRefresh(context, isRenewalOperationContextCurrent);
+  assertRenewalOperationContextCurrent(context);
+  return master;
+}
+
+async function reconcileRenewalServerSide(renewal, context) {
+  assertRenewalOperationContextCurrent(context);
+  const result = context.authMode === AUTH_SESSION_MODE
+    ? await reconcileRenewalAsAuthMaster(renewal)
+    : await reconcileRenewalAsLegacyMaster(renewal, context.legacyToken);
+  assertRenewalOperationContextCurrent(context);
+  if (result?.ok !== true) throw new Error("Não foi possível autorizar a reconciliação.");
+  return {
+    userWriteConfirmed: result.user_write_confirmed === true,
+    renewalWriteConfirmed: result.renewal_write_confirmed === true
+  };
+}
+
+async function runRenewUserOperation(userId, context) {
+  try {
+    await resolveRenewalMasterContext(context);
+  } catch {
+    if (isRenewalOperationContextCurrent(context)) showToast("Acesso não autorizado.");
+    return;
+  }
+
+  const initialUser = regularUsers().find(item => item.id === userId);
+  if (!initialUser || !isRenewalOperationContextCurrent(context)) return;
+  const newDate = await chooseRenewalDate(initialUser);
+  if (!newDate || !isRenewalOperationContextCurrent(context)) return;
+  if (!await confirmAction() || !isRenewalOperationContextCurrent(context)) return;
+
+  try {
+    await resolveRenewalMasterContext(context);
+  } catch {
+    if (isRenewalOperationContextCurrent(context)) showToast("Acesso não autorizado.");
+    return;
+  }
+
+  const liveUser = regularUsers().find(item => item.id === userId);
+  if (!liveUser || !isRenewalOperationContextCurrent(context)) return;
+  const renewal = {
+    id: crypto.randomUUID(),
+    userId: liveUser.id,
+    date: dateOffset(),
+    amount: Number(liveUser.renewalPrice || 0),
+    accessExpiresAt: newDate
+  };
   let userWriteConfirmed = false;
   let userWriteAmbiguous = false;
   let renewalWriteConfirmed = false;
   let renewalWriteAmbiguous = false;
 
   try {
-    await updateUserFields(user.id, { data_vencimento: newDate, status: "ativo" });
+    if (context.authMode === AUTH_SESSION_MODE) await renewUserAsAuthMaster(renewal);
+    else await renewUserAsLegacyMaster(renewal, context);
     userWriteConfirmed = true;
+    renewalWriteConfirmed = true;
   } catch (error) {
+    if (!isRenewalOperationContextCurrent(context)) return;
     if (!isRemoteWriteOutcomeUncertain(error)) return showToast("Não foi possível renovar o usuário.");
     try {
-      const remoteUser = await loadUserById(user.id);
-      if (remoteUser?.accessExpiresAt === newDate && !remoteUser.blocked) userWriteConfirmed = true;
-      else userWriteAmbiguous = true;
+      const reconciled = await reconcileRenewalServerSide(renewal, context);
+      userWriteConfirmed = reconciled.userWriteConfirmed;
+      renewalWriteConfirmed = reconciled.renewalWriteConfirmed;
+      userWriteAmbiguous = !userWriteConfirmed;
+      renewalWriteAmbiguous = !renewalWriteConfirmed;
     } catch {
+      if (!isRenewalOperationContextCurrent(context)) return;
       userWriteAmbiguous = true;
+      renewalWriteAmbiguous = true;
     }
   }
 
+  if (!isRenewalOperationContextCurrent(context)) return;
   if (!userWriteConfirmed) {
     if (userWriteAmbiguous) showToast("Não foi possível confirmar a renovação. Atualize a lista antes de tentar novamente.");
     else showToast("Não foi possível renovar o usuário.");
     return;
   }
 
-  user.accessExpiresAt = newDate;
-  user.blocked = false;
-  try {
-    await saveRenewalToSupabase(renewal);
-    renewalWriteConfirmed = true;
-  } catch (error) {
-    try {
-      const remoteRenewal = await loadRenewalById(renewal.id);
-      if (remoteRenewal?.id === renewal.id && remoteRenewal.usuario_id === user.id && remoteRenewal.nova_validade === newDate) {
-        renewalWriteConfirmed = true;
-      } else if (isRemoteWriteOutcomeUncertain(error)) {
-        renewalWriteAmbiguous = true;
-      }
-    } catch {
-      renewalWriteAmbiguous = true;
-    }
-  }
+  const confirmedUser = regularUsers().find(item => item.id === userId);
+  if (!confirmedUser || !isRenewalOperationContextCurrent(context)) return;
+  confirmedUser.accessExpiresAt = newDate;
+  confirmedUser.blocked = false;
 
   db.renewals ||= [];
   if (renewalWriteConfirmed && !db.renewals.some(item => item.id === renewal.id)) db.renewals.push(renewal);
@@ -7150,10 +8108,12 @@ async function renewUser(userId) {
   try {
     await refreshMasterData();
   } catch (error) {
+    if (!isRenewalOperationContextCurrent(context)) return;
     refreshFailed = true;
     console.error("[MEU BOLSO][Supabase] erro ao recarregar renovação Master", error);
   }
 
+  if (!isRenewalOperationContextCurrent(context)) return;
   if (!renewalWriteConfirmed) {
     showToast(renewalWriteAmbiguous
       ? "Validade atualizada, mas não foi possível confirmar o histórico. Atualize antes de tentar novamente."
@@ -7164,6 +8124,24 @@ async function renewUser(userId) {
     showToast("Renovação realizada com sucesso.");
   }
   render();
+}
+
+async function renewUser(userId) {
+  if (!canUseMasterContext()) return showToast("Acesso não autorizado.");
+  const pending = activeRenewalOperations.get(userId);
+  if (pending && isRenewalOperationContextCurrent(pending.context)) return pending.promise;
+  if (pending) activeRenewalOperations.delete(userId);
+  if (!regularUsers().some(item => item.id === userId)) return;
+
+  const context = createRenewalOperationContext(userId);
+  const operation = { context, promise: null };
+  activeRenewalOperations.set(userId, operation);
+  operation.promise = runRenewUserOperation(userId, context);
+  try {
+    return await operation.promise;
+  } finally {
+    if (activeRenewalOperations.get(userId) === operation) activeRenewalOperations.delete(userId);
+  }
 }
 
 function chooseRenewalDate(user) {
@@ -7234,7 +8212,7 @@ async function saveCard(event) {
   }
   try {
     await saveCardToSupabase(savedCard);
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
     selectedCardId = savedCard.id;
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
@@ -7322,7 +8300,7 @@ async function saveCardPurchase(event) {
     await savePurchaseToSupabase(savedPurchase);
     const installmentTransactions = (db.transactions[session] || []).filter(item => item.sourcePurchaseId === savedPurchase.id);
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
     selectedCardId = savedPurchase.cardId;
   } catch (error) {
     db.cardPurchases[session] = purchasesBeforeSave;
@@ -7412,7 +8390,7 @@ async function deleteCard(cardId) {
     db.cardPurchases[session] = (db.cardPurchases[session] || []).filter(item => item.cardId !== cardId);
     db.transactions[session] = (db.transactions[session] || []).filter(item => item.cardId !== cardId);
     cacheDatabase();
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showDeleteError(error);
   }
@@ -7438,7 +8416,7 @@ async function deletePurchase(purchaseId) {
     db.cardPurchases[session] = (db.cardPurchases[session] || []).filter(item => item.id !== purchaseId);
     db.transactions[session] = (db.transactions[session] || []).filter(item => item.sourcePurchaseId !== purchaseId);
     cacheDatabase();
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showDeleteError(error);
   }
@@ -7603,7 +8581,7 @@ async function deletePurchaseInstallment(purchaseId, installmentNumber, installm
       db.cardPurchases[session] = userCardPurchases().filter(item => item.id !== purchase.id);
       db.transactions[session] = currentTransactions.filter(item => item.sourcePurchaseId !== purchase.id);
       cacheDatabase();
-      await refreshUserFinancialData();
+      await refreshUserFinancialData({ primaryOperationPersisted: true });
     } catch (error) {
       console.error("[MEU BOLSO][Supabase] erro ao excluir última parcela", error);
       return showToast("Não foi possível excluir a parcela no Supabase.");
@@ -7651,7 +8629,7 @@ async function deletePurchaseInstallment(purchaseId, installmentNumber, installm
     db.cardPurchases[session] = userCardPurchases().map(item => item.id === purchase.id ? result.purchase : item);
     db.transactions[session] = updatedTransactions;
     cacheDatabase();
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     console.error("[MEU BOLSO][Supabase] erro ao excluir parcela", error);
     return showToast("Não foi possível excluir a parcela no Supabase.");
@@ -7704,7 +8682,7 @@ async function payCardInstallment(purchaseId, installmentKey = null, options = {
     await savePurchaseToSupabase(purchase);
     const installmentTransactions = (db.transactions[session] || []).filter(item => item.sourcePurchaseId === purchase.id);
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -7749,7 +8727,7 @@ async function payPayablesCardGroup(cardId) {
     await Promise.all(purchases.map(savePurchaseToSupabase));
     const paidTransactions = (db.transactions[session] || []).filter(item => purchaseIds.includes(item.sourcePurchaseId));
     await Promise.all(paidTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     purchases.forEach(purchase => {
       const snapshot = snapshots.get(purchase.id);
@@ -7799,7 +8777,7 @@ async function payOverdueCardGroup(cardId) {
     await Promise.all(purchases.map(savePurchaseToSupabase));
     const paidTransactions = (db.transactions[session] || []).filter(item => purchaseIds.includes(item.sourcePurchaseId));
     await Promise.all(paidTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     purchases.forEach(purchase => {
       const snapshot = snapshots.get(purchase.id);
@@ -7855,7 +8833,7 @@ async function payCardInvoice(cardId, options = {}) {
     await Promise.all(purchases.map(savePurchaseToSupabase));
     const installmentTransactions = (db.transactions[session] || []).filter(item => purchases.some(purchase => item.sourcePurchaseId === purchase.id));
     await Promise.all(installmentTransactions.map(item => saveTransactionToSupabase(item)));
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -7872,7 +8850,7 @@ async function closePurchase(purchaseId) {
   purchase.closed = true;
   try {
     await savePurchaseToSupabase(purchase);
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -7924,18 +8902,6 @@ function isValidBrazilianWhatsapp(value = "") {
   return digits.length === 11 && BRAZILIAN_AREA_CODES.has(digits.slice(0, 2)) && /^9\d{8}$/.test(digits.slice(2));
 }
 
-async function securityDataHasConflict(property, column, value, userId) {
-  const normalized = property === "whatsapp" ? normalizePhone(value) : value.toLocaleLowerCase("pt-BR");
-  const localConflict = db.users.some(user => {
-    if (user.id === userId) return false;
-    const current = property === "whatsapp" ? normalizePhone(user[property]) : String(user[property] || "").toLocaleLowerCase("pt-BR");
-    return current === normalized;
-  });
-  if (localConflict) return true;
-  const rows = await supabaseSelect("usuarios", `select=id&${column}=eq.${encodeURIComponent(value)}&id=neq.${encodeURIComponent(userId)}&limit=1`);
-  return rows.length > 0;
-}
-
 async function saveSecurityData(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -7965,28 +8931,8 @@ async function saveSecurityData(event) {
   if (!BRAZILIAN_STATES.includes(values.state)) return setSecurityFormError("[data-security-data-error]", "Selecione um estado válido.");
   setSecurityFormError("[data-security-data-error]", "");
   try {
-    const uniqueFields = [
-      { property: "email", column: "email", label: "E-mail" },
-      { property: "whatsapp", column: "whatsapp", label: "WhatsApp" },
-      { property: "username", column: "usuario", label: "Usuário" }
-    ];
-    for (const field of uniqueFields) {
-      const previous = field.property === "whatsapp" ? normalizePhone(user[field.property]) : String(user[field.property] || "").toLocaleLowerCase("pt-BR");
-      const current = field.property === "whatsapp" ? normalizePhone(values[field.property]) : values[field.property];
-      if (previous !== current && await securityDataHasConflict(field.property, field.column, values[field.property], user.id)) {
-        return setSecurityFormError("[data-security-data-error]", `${field.label} já está em uso.`);
-      }
-    }
     const updatedUser = { ...user, ...values };
-    await updateUserFields(user.id, {
-      nome: updatedUser.name,
-      email: updatedUser.email,
-      whatsapp: updatedUser.whatsapp,
-      usuario: updatedUser.username,
-      endereco: updatedUser.address,
-      cidade: updatedUser.city,
-      estado: updatedUser.state
-    });
+    await saveOwnSecurityProfile(user, values);
     Object.assign(user, updatedUser);
     saveSession(user);
     cacheDatabase();
@@ -7994,7 +8940,7 @@ async function saveSecurityData(event) {
     render();
     showToast("Dados atualizados com sucesso.");
   } catch (error) {
-    console.error("[MEU BOLSO][Segurança] erro ao atualizar dados", error);
+    console.error("[MEU BOLSO][Segurança] erro ao atualizar dados", error?.name || "PROFILE_UPDATE_FAILED");
     setSecurityFormError("[data-security-data-error]", "Não foi possível salvar no Supabase. Tente novamente.");
   }
 }
@@ -8029,12 +8975,11 @@ async function changePassword(event) {
   }
   setSecurityFormError("[data-security-password-error]", "");
   try {
-    const validatedUser = await validateLegacyPassword(user.username, currentPassword);
-    if (!validatedUser || validatedUser.id !== user.id) {
+    const changed = await changeLegacyPasswordServerSide(user.username, currentPassword, newPassword);
+    if (changed !== true) {
       clearPasswordFields(form);
       return setSecurityFormError("[data-security-password-error]", "A senha atual está incorreta.");
     }
-    await updateLegacyPassword(user.id, newPassword);
     closeSecurityPasswordDialog();
     render();
     showToast("Senha alterada com sucesso.");
@@ -8084,7 +9029,7 @@ document.querySelector("#list-form").addEventListener("submit", async event => {
   }
   try {
     await saveListItemToSupabase(activeListType, name);
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showToast("Não foi possível salvar no Supabase.");
   }
@@ -8144,7 +9089,7 @@ async function deleteListItem(item) {
   updateTransactionsListValue(activeListType, item, replacement);
   try {
     await saveDatabase();
-    await refreshUserFinancialData();
+    await refreshUserFinancialData({ primaryOperationPersisted: true });
   } catch (error) {
     return showDeleteError(error);
   }
@@ -8304,7 +9249,7 @@ async function initializeApp() {
             return;
           }
         }
-        user = await loadUserByAuthId(sessionAuthUserId);
+        user = await loadCurrentAuthUser();
         if (user && user.id !== session) {
           await supabaseAuthClient.auth.signOut({ scope: "local" });
           clearSession();
@@ -8312,8 +9257,30 @@ async function initializeApp() {
           authView = "login";
           return;
         }
+      } else if (LEGACY_VERIFIABLE_SESSION_ENABLED) {
+        try {
+          user = await loadCurrentLegacyUser(sessionLegacyToken);
+        } catch {
+          clearSession();
+          db = emptyDatabase();
+          authView = "login";
+          return;
+        }
+        if (!user) {
+          clearSession();
+          db = emptyDatabase();
+          authView = "login";
+          return;
+        }
+        session = user.id;
       } else {
-        user = await loadUserById(session);
+        // Sessao Legacy antiga (UUID/localStorage) nao e prova de identidade.
+        // Com a sessao verificavel desligada, exige novo login em vez de
+        // restaurar o usuario por um identificador controlado pelo cliente.
+        clearSession();
+        db = emptyDatabase();
+        authView = "login";
+        return;
       }
       if (user) {
         if (isAccessBlocked(user)) {
