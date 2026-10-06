@@ -9260,7 +9260,8 @@ async function initializeApp() {
       } else if (LEGACY_VERIFIABLE_SESSION_ENABLED) {
         try {
           user = await loadCurrentLegacyUser(sessionLegacyToken);
-        } catch {
+        } catch (error) {
+          if (isNetworkError(error) || isRestRequestTimeoutError(error) || error?.code === "CREDENTIAL_OPERATION_REQUIRES_ONLINE") throw error;
           clearSession();
           db = emptyDatabase();
           authView = "login";
@@ -9306,7 +9307,7 @@ async function initializeApp() {
     }
   } catch (error) {
     const cached = loadCachedDatabase();
-    if (session && isNetworkError(error) && cached) {
+    if (session && (isNetworkError(error) || isRestRequestTimeoutError(error) || error?.code === "CREDENTIAL_OPERATION_REQUIRES_ONLINE") && cached) {
       db = cached;
       isOfflineMode = true;
       await ensureMonthlyOccurrences(session);
