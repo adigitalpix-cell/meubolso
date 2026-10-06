@@ -9,7 +9,7 @@ const ADMIN_NOTIFICATION_KEY = "meu-bolso-admin-notifications";
 const FORM_DRAFT_KEY_PREFIX = "meu-bolso-form-draft";
 const FORM_DRAFT_VERSION = 1;
 const APP_NAME = "MEU BOLSO";
-const APP_UPDATED_AT = "16/07/2026";
+const APP_UPDATED_AT = "06/10/2026";
 const SUPABASE_CONFIG = window.SUPABASE_CONFIG || {};
 const SUPABASE_READY = Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
 const AUTH_DUAL_LOGIN_ENABLED = SUPABASE_CONFIG.authDualLoginEnabled === true;
@@ -5471,7 +5471,7 @@ function profileTemplate() {
       <div>
         <span>Versão do Aplicativo</span>
         <h2>${escapeHtml(APP_NAME)}</h2>
-        <p>Versão ${escapeHtml(window.APP_BUILD_CONFIG.version)}</p>
+        <p>Versão ${escapeHtml(isMaster() ? window.APP_BUILD_CONFIG.version : window.APP_BUILD_CONFIG.version.split(".").slice(0, 2).join("."))}</p>
         <small>Última atualização: ${escapeHtml(APP_UPDATED_AT)}</small>
       </div>
       ${profileVersionActionsTemplate()}

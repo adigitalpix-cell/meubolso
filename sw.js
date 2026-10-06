@@ -1,9 +1,9 @@
-const CACHE_NAME = "meu-bolso-v0.68.4";
+const CACHE_NAME = "meu-bolso-v1.0.0";
 const ASSETS = [
   "/",
   "/index.html",
   "/styles.css",
-  "/app.js?v=0.68.4",
+  "/app.js?v=1.0.0",
   "/vendor/supabase-js-2.112.2.min.js",
   "/supabase-config.js",
   "/manifest.webmanifest",
